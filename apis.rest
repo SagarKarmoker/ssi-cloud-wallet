@@ -3,7 +3,16 @@ POST http://localhost:3000/api/wallet/create
 Content-Type: application/json
 
 {
-    "walletName": "test_wallet_01",
-    "walletKey": "test_wallet_key_01",
+    "walletName": "test_wallet_02",
+    "walletKey": "test_wallet_key_02",
     "walletLabel": "Test Wallet"
 }
+
+### get wallet info
+GET http://localhost:3000/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53
+Content-Type: application/json
+
+### get auth token
+POST http://localhost:3000/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53/token
+Content-Type: application/json
+

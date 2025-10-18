@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, ConflictException } from '@nestjs/common';
 import axiosInstance from 'src/utils/axiosIntance';
 
 @Injectable()
@@ -32,16 +32,72 @@ export class WalletService {
         payload,
       );
 
-      this.logger.log(`Wallet created successfully: ${response.data.wallet_id}`);
+      this.logger.log(
+        `Wallet created successfully: ${response.data.wallet_id}`,
+      );
 
       return response.data;
-    } catch (error) {
-      this.logger.error(
-        `Failed to create wallet: ${error.response?.data || error.message}`,
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to create wallet: ${msg}`);
+
+      const status = error.response?.status;
+      const data = error.response?.data;
+
+      if (status === 400 && typeof data === 'string' && /already exists/i.test(data)) {
+        // Use ConflictException for standard Nest handling
+        throw new ConflictException(`Wallet already exists: ${data}`);
+      }
+
+      // Fallback: throw a generic HttpException with the remote status if present
+      if (status) {
+        throw new HttpException(`Failed to create wallet: ${data}`, status);
+      }
+
+      throw new HttpException(`Failed to create wallet: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getWallet(id: string) {
+    try {
+      const response = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/multitenancy/wallet/${id}`,
       );
-      throw new Error(
-        `Failed to create wallet: ${error.response?.data || error.message}`,
+
+      this.logger.log(`Wallet retrieved successfully: ${id}`);
+
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to retrieve wallet: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to retrieve wallet: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to retrieve wallet: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getAuthToken(id: string, walletKey?: string) {
+    try {
+      const response = await axiosInstance.post(
+        `${this.ACAPY_ADMIN_URL}/multitenancy/wallet/${id}/token`,
+        { wallet_key: walletKey },
       );
+
+      this.logger.log(
+        `Auth token retrieved successfully: ${response.data.token}`,
+      );
+
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to retrieve auth token: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to retrieve auth token: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to retrieve auth token: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 }
