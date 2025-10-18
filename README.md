@@ -141,15 +141,4 @@ If you'd like help prioritizing work, open an issue describing the change and in
 - If tests fail due to network timeouts, ensure mocked services or local test fixtures are running.
 
 ## Contact / Authors
-
-Maintainership and contact information aren't included in the repository. If this is your project, add the maintainer contact or organization details here.
-
----
-
-If you'd like, I can:
-
-- Add a simple `.env.example` with common variables
-- Add a Dockerfile and docker-compose for local development
-- Generate API documentation (OpenAPI/Swagger) wiring in `main.ts`
-
-Tell me which of the above you'd like next and I'll implement it.
+contract: sagarkarmoker.official@gmail.com
