@@ -1,7 +1,9 @@
 import { Controller, Post, Body, Req, HttpCode, Logger } from '@nestjs/common';
+import { WebhookService } from './webhook.service';
 
 @Controller('api/webhooks')
 export class WebhookController {
+  constructor(private readonly webhookService: WebhookService) {}
   private readonly logger = new Logger(WebhookController.name);
 
   // Handle dynamic topics: /api/webhooks/connections, /api/webhooks/proofs, etc.
@@ -41,12 +43,7 @@ export class WebhookController {
     }
   }
 
-  private async handleCredential(payload: any) {
-    // Example: Notify user that a new credential was received
-    if (payload.state === 'credential_acked') {
-      this.logger.log(`Credential stored: ${payload.credential_exchange_id}`);
-    }
-  }
+  private async handleCredential(payload: any) {}
 
   private async handleProof(payload: any) {
     // Example: Auto-respond to proof requests (if policy allows)
