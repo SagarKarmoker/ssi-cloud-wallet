@@ -1,0 +1,9 @@
+### create wallet
+POST http://localhost:3000/api/wallet/create
+Content-Type: application/json
+
+{
+    "walletName": "test_wallet_01",
+    "walletKey": "test_wallet_key_01",
+    "walletLabel": "Test Wallet"
+}
