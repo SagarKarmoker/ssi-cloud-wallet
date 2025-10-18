@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import axiosInstance from 'src/utils/axiosIntance';
 
 @Injectable()
@@ -9,6 +9,7 @@ export class WalletService {
     process.env.WALLET_WEBHOOK_URL ||
     'https://eaabc87e3568.ngrok-free.app/api/webhooks'
   ).trim();
+  private readonly logger = new Logger(WalletService.name);
 
   async createWallet(
     walletName: string,
@@ -31,8 +32,13 @@ export class WalletService {
         payload,
       );
 
+      this.logger.log(`Wallet created successfully: ${response.data.wallet_id}`);
+
       return response.data;
     } catch (error) {
+      this.logger.error(
+        `Failed to create wallet: ${error.response?.data || error.message}`,
+      );
       throw new Error(
         `Failed to create wallet: ${error.response?.data || error.message}`,
       );
