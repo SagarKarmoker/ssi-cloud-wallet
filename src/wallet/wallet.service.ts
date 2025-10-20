@@ -4,7 +4,7 @@ import axiosInstance from 'src/utils/axiosIntance';
 @Injectable()
 export class WalletService {
   private readonly ACAPY_ADMIN_URL =
-    process.env.ACAPY_ADMIN_URL || 'http://localhost:8021';
+    process.env.ACAPY_ADMIN_URL || 'http://localhost:8031';
   private readonly webhookUrl = (
     process.env.WALLET_WEBHOOK_URL ||
     'https://eaabc87e3568.ngrok-free.app/api/webhooks'

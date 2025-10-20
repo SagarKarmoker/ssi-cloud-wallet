@@ -5,7 +5,7 @@ import { WalletService } from 'src/wallet/wallet.service';
 @Injectable()
 export class CredentialService {
   private readonly ACAPY_ADMIN_URL =
-    process.env.ACAPY_ADMIN_URL || 'http://localhost:8021';
+    process.env.ACAPY_ADMIN_URL || 'http://localhost:8031';
 
   constructor(private readonly walletService: WalletService) {}
 
