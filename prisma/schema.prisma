@@ -13,3 +13,86 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  password        String
+  fullName        String
+  phoneNumber     String?
+  isActive        Boolean  @default(true)
+  isEmailVerified Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // User's wallets
+  wallets         UserWallet[]
+  
+  @@map("users")
+}
+
+model UserWallet {
+  id               String   @id @default(cuid())
+  userId           String
+  walletId         String   @unique
+  walletName       String
+  walletLabel      String?
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_wallets")
+}
+
+model Connection {
+  id             String   @id @default(cuid())
+  userId         String
+  walletId       String
+  connectionId   String   @unique
+  theirLabel     String?
+  theirDid       String?
+  myDid          String?
+  state          String
+  alias          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("connections")
+}
+
+model Credential {
+  id                     String   @id @default(cuid())
+  userId                 String
+  walletId               String
+  credentialId           String   @unique
+  credentialExchangeId   String?
+  schemaId               String
+  credDefId              String
+  connectionId           String?
+  state                  String
+  attributes             Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@map("credentials")
+}
+
+model ProofRequest {
+  id                       String   @id @default(cuid())
+  userId                   String
+  walletId                 String
+  proofRequestId           String   @unique
+  presentationExchangeId   String?
+  connectionId             String?
+  state                    String
+  verified                 Boolean?
+  presentationRequest      Json?
+  presentation             Json?
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@map("proof_requests")
+}

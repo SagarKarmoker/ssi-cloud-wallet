@@ -1,0 +1,53 @@
+### Auth API Tests
+
+# Register a new user
+POST http://localhost:5001/auth/register
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "TestPassword123!",
+  "fullName": "Test User",
+  "phoneNumber": "+1234567890"
+}
+
+###
+
+# Login with the user
+POST http://localhost:5001/auth/login
+Content-Type: application/json
+
+{
+  "email": "test@example.com",
+  "password": "TestPassword123!"
+}
+
+###
+
+# Get user profile (requires Bearer token from login response)
+GET http://localhost:5001/auth/profile
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+###
+
+# Update user profile (requires Bearer token)
+PUT http://localhost:5001/auth/profile
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+{
+  "fullName": "Updated Test User",
+  "phoneNumber": "+0987654321"
+}
+
+###
+
+# Change password (requires Bearer token)
+PUT http://localhost:5001/auth/change-password
+Content-Type: application/json
+Authorization: Bearer YOUR_JWT_TOKEN_HERE
+
+{
+  "currentPassword": "TestPassword123!",
+  "newPassword": "NewPassword456!"
+}

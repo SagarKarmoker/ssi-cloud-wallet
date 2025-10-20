@@ -1,5 +1,6 @@
 import { Injectable, Logger, HttpException, HttpStatus, ConflictException } from '@nestjs/common';
 import axiosInstance from 'src/utils/axiosIntance';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class WalletService {
@@ -11,10 +12,13 @@ export class WalletService {
   ).trim();
   private readonly logger = new Logger(WalletService.name);
 
+  constructor(private readonly prisma: PrismaService) {}
+
   async createWallet(
     walletName: string,
     walletKey: string,
     walletLabel: string,
+    userId: string,
   ) {
     try {
       const payload = {
@@ -35,6 +39,17 @@ export class WalletService {
       this.logger.log(
         `Wallet created successfully: ${response.data.wallet_id}`,
       );
+
+      // Save wallet to database
+      await this.prisma.userWallet.create({
+        data: {
+          userId,
+          walletId: response.data.wallet_id,
+          walletName,
+          walletLabel,
+          isDefault: true, // Set as default if it's the user's first wallet
+        },
+      });
 
       return response.data;
     } catch (error: any) {
@@ -75,6 +90,60 @@ export class WalletService {
         throw new HttpException(`Failed to retrieve wallet: ${msg}`, status);
       }
       throw new HttpException(`Failed to retrieve wallet: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getUserWallets(userId: string) {
+    try {
+      // Get user's wallets from database
+      const userWallets = await this.prisma.userWallet.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      // Get wallet details from ACA-Py for each wallet
+      const walletsWithDetails = await Promise.all(
+        userWallets.map(async (userWallet) => {
+          try {
+            const acapyWallet = await axiosInstance.get(
+              `${this.ACAPY_ADMIN_URL}/multitenancy/wallet/${userWallet.walletId}`,
+            );
+            
+            return {
+              wallet_id: userWallet.walletId,
+              wallet_name: userWallet.walletName,
+              label: userWallet.walletLabel,
+              settings: acapyWallet.data.settings || {},
+              created_at: userWallet.createdAt,
+              updated_at: userWallet.updatedAt,
+              isDefault: userWallet.isDefault,
+              // Include ACA-Py specific data
+              ...acapyWallet.data,
+            };
+          } catch (error) {
+            // If ACA-Py wallet doesn't exist, return basic info from database
+            this.logger.warn(`Could not fetch ACA-Py details for wallet ${userWallet.walletId}: ${error.message}`);
+            return {
+              wallet_id: userWallet.walletId,
+              wallet_name: userWallet.walletName,
+              label: userWallet.walletLabel,
+              created_at: userWallet.createdAt,
+              updated_at: userWallet.updatedAt,
+              isDefault: userWallet.isDefault,
+              settings: {},
+            };
+          }
+        })
+      );
+
+      return {
+        results: walletsWithDetails,
+        count: walletsWithDetails.length,
+      };
+    } catch (error: any) {
+      const msg = error.message || 'Unknown error';
+      this.logger.error(`Failed to get user wallets: ${msg}`);
+      throw new HttpException(`Failed to get user wallets: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
 

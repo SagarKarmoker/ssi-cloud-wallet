@@ -7,9 +7,10 @@ import { ConnectionModule } from './connection/connection.module';
 import { CredentialModule } from './credential/credential.module';
 import { ProofModule } from './proof/proof.module';
 import { DidModule } from './did/did.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
-  imports: [WalletModule, WebhookModule, ConnectionModule, CredentialModule, ProofModule, DidModule],
+  imports: [WalletModule, WebhookModule, ConnectionModule, CredentialModule, ProofModule, DidModule, AuthModule],
   controllers: [AppController],
   providers: [AppService],
 })

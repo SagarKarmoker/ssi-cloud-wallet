@@ -1,29 +1,33 @@
-import { Body, Controller, Get, Param, Post, Put, Delete, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Put, Delete, Query, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { WalletService } from './wallet.service';
 import { CreateWalletDto } from './dto/createWallet.dto';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Wallet Management')
 @Controller('/api/wallet')
+@UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
   @Post('create')
   @ApiOperation({ summary: 'Create a new multi-tenant wallet' })
   @ApiResponse({ status: 201, description: 'Wallet created successfully' })
-  createWallet(@Body() body: CreateWalletDto) {
+  createWallet(@Body() body: CreateWalletDto, @Request() req) {
     return this.walletService.createWallet(
       body.walletName,
       body.walletKey,
       body.walletLabel,
+      req.user.id,
     );
   }
 
   @Get()
-  @ApiOperation({ summary: 'List all wallets (admin only)' })
+  @ApiOperation({ summary: 'List user wallets' })
   @ApiResponse({ status: 200, description: 'Wallets retrieved successfully' })
-  listWallets() {
-    return this.walletService.listWallets();
+  listWallets(@Request() req) {
+    return this.walletService.getUserWallets(req.user.id);
   }
 
   @Get(':id')
