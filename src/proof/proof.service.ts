@@ -71,6 +71,8 @@ export class ProofService {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
+      this.logger.log(`Sending presentation for exchange ${presExId}. Payload: ${JSON.stringify(presentationSpec)}`);
+
       const response = await axiosInstance.post(
         `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/send-presentation`,
         presentationSpec,
@@ -82,10 +84,12 @@ export class ProofService {
       this.logger.log(`Sent presentation for exchange record ${presExId} from wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
-      const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to send presentation: ${msg}`);
+      const errorDetails = error.response?.data || error.message || 'Unknown error';
+      const errorMessage = typeof errorDetails === 'object' ? JSON.stringify(errorDetails) : errorDetails;
+      this.logger.error(`Failed to send presentation: ${errorMessage}`);
+      this.logger.error(`Full error response: ${JSON.stringify(error.response?.data)}`);
       throw new HttpException(
-        `Failed to send presentation: ${msg}`,
+        `Failed to send presentation: ${errorMessage}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

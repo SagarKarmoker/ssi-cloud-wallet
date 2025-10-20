@@ -66,6 +66,11 @@ class ProofService {
     return response.data;
   }
 
+  async getPresentationExchangeRecord(walletId: string, presentationExchangeId: string): Promise<any> {
+    const response = await api.get(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}`);
+    return response.data;
+  }
+
   async sendPresentation(walletId: string, presentationExchangeId: string, data: PresentationData): Promise<ProofRequest> {
     const response = await api.post(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/send-presentation`, data);
     return response.data;
@@ -85,7 +90,7 @@ class ProofService {
   }
 
   async sendProblemReport(walletId: string, presentationExchangeId: string, explanation: string): Promise<void> {
-    await api.post(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/problem-report`, { explanation });
+    await api.post(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/problem-report`, { description: explanation });
   }
 
   // Legacy method names for backward compatibility

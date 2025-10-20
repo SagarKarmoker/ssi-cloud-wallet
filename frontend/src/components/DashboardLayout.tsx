@@ -43,7 +43,7 @@ export function DashboardLayout() {
     { key: 'wallets', label: 'Wallets', icon: '🏦', path: '/' },
     { key: 'connections', label: 'Connections', icon: '🔗', path: '/connections' },
     { key: 'credentials', label: 'Credentials', icon: '📄', path: '/credentials' },
-    { key: 'proofs', label: 'Proofs', icon: '✅', path: '/proofs' },
+    { key: 'proofs', label: 'Proof Requests', icon: '🎯', path: '/proofs' },
     { key: 'dids', label: 'DIDs', icon: '🆔', path: '/dids' }
   ];
 
