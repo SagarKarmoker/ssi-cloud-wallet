@@ -141,7 +141,7 @@ PORT=3000
 NODE_ENV=development
 
 # ACA-Py Agent Configuration
-ACAPY_ADMIN_URL=http://localhost:8021
+ACAPY_ADMIN_URL=http://localhost:8031
 
 # Webhook Configuration
 WALLET_WEBHOOK_URL=https://your-ngrok-url.ngrok.io/api/webhooks

@@ -1,5 +1,5 @@
 ### create wallet
-POST http://localhost:3000/api/wallet/create
+POST http://localhost:5001/api/wallet/create
 Content-Type: application/json
 
 {
@@ -9,10 +9,18 @@ Content-Type: application/json
 }
 
 ### get wallet info
-GET http://localhost:3000/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53
+GET http://localhost:5001/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53
 Content-Type: application/json
 
 ### get auth token
-POST http://localhost:3000/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53/token
+POST http://localhost:5001/api/wallet/5487b702-a314-436c-8b0a-e650aef70d53/token
 Content-Type: application/json
 
+### accept invite
+POST http://localhost:5001/api/connection/accept-invitation
+Content-Type: application/json
+
+{
+    "invitation": "https://4e76d0939507.ngrok-free.app?c_i=eyJAdHlwZSI6ICJodHRwczovL2RpZGNvbW0ub3JnL2Nvbm5lY3Rpb25zLzEuMC9pbnZpdGF0aW9uIiwgIkBpZCI6ICI1OGZiN2RjMi02MjYwLTQyMGQtYTA3Ny1jYzA4MWM5ODUwNDUiLCAibGFiZWwiOiAiU1NJIEF2YXRhciBJc3N1ZXIiLCAicmVjaXBpZW50S2V5cyI6IFsiQ3pQbVJZelhIeU1LQlc0YVdkV01RQmtnV0QyWXNDNXdIdDhFYkdabUZTV0wiXSwgInNlcnZpY2VFbmRwb2ludCI6ICJodHRwczovLzRlNzZkMDkzOTUwNy5uZ3Jvay1mcmVlLmFwcCJ9",
+    "walletId": "493869e2-540c-484a-9ff6-d4216751505b"
+}
