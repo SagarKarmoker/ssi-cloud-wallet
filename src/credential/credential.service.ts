@@ -121,6 +121,42 @@ export class CredentialService {
     }
   }
 
+  async sendCredentialRequest(walletId: string, credExId: string) {
+    try {
+      const tokenResponse = await this.walletService.getAuthToken(walletId);
+      const token = tokenResponse.token;
+
+      this.logger.log(`Attempting to send credential request for exchange ${credExId} in wallet ${walletId}`);
+
+      const response = await axiosInstance.post(
+        `${this.ACAPY_ADMIN_URL}/issue-credential-2.0/records/${credExId}/send-request`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      this.logger.log(`Successfully sent credential request for exchange record ${credExId}. Response: ${JSON.stringify(response.data)}`);
+      return response.data;
+    } catch (error: any) {
+      const statusCode = error.response?.status;
+      const responseData = error.response?.data;
+      const errorMessage = error.message;
+      
+      this.logger.error(`Failed to send credential request for exchange ${credExId}:`);
+      this.logger.error(`  Status Code: ${statusCode}`);
+      this.logger.error(`  Response Data: ${JSON.stringify(responseData)}`);
+      this.logger.error(`  Error Message: ${errorMessage}`);
+      
+      const msg = responseData?.detail || responseData?.message || responseData || errorMessage || 'Unknown error';
+      
+      throw new HttpException(
+        `Failed to send credential request: ${msg}`,
+        statusCode || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async storeCredential(walletId: string, credExId: string, credentialId?: string) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);

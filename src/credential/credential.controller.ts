@@ -49,6 +49,16 @@ export class CredentialController {
     return this.credentialService.getCredentialExchangeRecord(walletId, credExId);
   }
 
+  @Post(':walletId/credential-exchange/:credExId/send-request')
+  @ApiOperation({ summary: 'Send credential request (accept offer)' })
+  @ApiResponse({ status: 200, description: 'Credential request sent successfully' })
+  async sendCredentialRequest(
+    @Param('walletId') walletId: string,
+    @Param('credExId') credExId: string
+  ) {
+    return this.credentialService.sendCredentialRequest(walletId, credExId);
+  }
+
   @Post(':walletId/credential-exchange/:credExId/store')
   @ApiOperation({ summary: 'Store a received credential' })
   @ApiResponse({ status: 200, description: 'Credential stored successfully' })
