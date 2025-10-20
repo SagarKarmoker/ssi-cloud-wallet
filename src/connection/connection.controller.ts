@@ -1,12 +1,14 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { ConnectionService } from './connection.service';
+import { AcceptInviteDto } from './dto/acceptInvite.dto';
+import { ApiBody } from '@nestjs/swagger';
 
 @Controller('api/connection')
 export class ConnectionController {
     constructor(private readonly connectionService: ConnectionService) {}
 
     @Post('accept-invitation')
-    acceptInvitation(@Body() body: { walletId: string, invitation: any }) {
+    acceptInvitation(@Body() body: AcceptInviteDto) {
         return this.connectionService.acceptInvitation(body.walletId, body.invitation);
     }
 }

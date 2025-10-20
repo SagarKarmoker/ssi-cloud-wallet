@@ -1,19 +1,13 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { WalletService } from './wallet.service';
+import { CreateWalletDto } from './dto/createWallet.dto';
 
 @Controller('/api/wallet')
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}
 
   @Post('create')
-  createWallet(
-    @Body()
-    body: {
-      walletName: string;
-      walletKey: string;
-      walletLabel: string;
-    },
-  ) {
+  createWallet(@Body() body: CreateWalletDto) {
     return this.walletService.createWallet(
       body.walletName,
       body.walletKey,
