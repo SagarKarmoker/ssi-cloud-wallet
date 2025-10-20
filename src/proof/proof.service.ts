@@ -3,74 +3,19 @@ import axiosInstance from 'src/utils/axiosIntance';
 import { WalletService } from 'src/wallet/wallet.service';
 
 @Injectable()
-export class CredentialService {
+export class ProofService {
   private readonly ACAPY_ADMIN_URL =
     process.env.ACAPY_ADMIN_URL || 'http://localhost:8031';
-  private readonly logger = new Logger(CredentialService.name);
+  private readonly logger = new Logger(ProofService.name);
 
   constructor(private readonly walletService: WalletService) {}
 
-  async listCredentials(walletId: string, wql?: string) {
+  async getPresentationExchangeRecords(walletId: string, state?: string, connectionId?: string) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
-      let url = `${this.ACAPY_ADMIN_URL}/credentials`;
-      if (wql) {
-        url += `?wql=${encodeURIComponent(wql)}`;
-      }
-
-      const response = await axiosInstance.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      this.logger.log(`Retrieved ${response.data.results?.length || 0} credentials for wallet ${walletId}`);
-      return response.data;
-    } catch (error: any) {
-      const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to list credentials: ${msg}`);
-      throw new HttpException(
-        `Failed to list credentials: ${msg}`,
-        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  async getCredential(walletId: string, credentialId: string) {
-    try {
-      const tokenResponse = await this.walletService.getAuthToken(walletId);
-      const token = tokenResponse.token;
-
-      const response = await axiosInstance.get(
-        `${this.ACAPY_ADMIN_URL}/credential/${credentialId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-
-      this.logger.log(`Retrieved credential ${credentialId} for wallet ${walletId}`);
-      return response.data;
-    } catch (error: any) {
-      const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to get credential: ${msg}`);
-      
-      if (error.response?.status === 404) {
-        throw new NotFoundException(`Credential ${credentialId} not found`);
-      }
-
-      throw new HttpException(
-        `Failed to get credential: ${msg}`,
-        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  async getCredentialExchangeRecords(walletId: string, state?: string, connectionId?: string) {
-    try {
-      const tokenResponse = await this.walletService.getAuthToken(walletId);
-      const token = tokenResponse.token;
-
-      let url = `${this.ACAPY_ADMIN_URL}/issue-credential-2.0/records`;
+      let url = `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records`;
       const params = new URLSearchParams();
       if (state) params.append('state', state);
       if (connectionId) params.append('connection_id', connectionId);
@@ -80,118 +25,171 @@ export class CredentialService {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      this.logger.log(`Retrieved ${response.data.results?.length || 0} credential exchange records for wallet ${walletId}`);
+      this.logger.log(`Retrieved ${response.data.results?.length || 0} presentation exchange records for wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to get credential exchange records: ${msg}`);
+      this.logger.error(`Failed to get presentation exchange records: ${msg}`);
       throw new HttpException(
-        `Failed to get credential exchange records: ${msg}`,
+        `Failed to get presentation exchange records: ${msg}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  async getCredentialExchangeRecord(walletId: string, credExId: string) {
+  async getPresentationExchangeRecord(walletId: string, presExId: string) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
       const response = await axiosInstance.get(
-        `${this.ACAPY_ADMIN_URL}/issue-credential-2.0/records/${credExId}`,
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
 
-      this.logger.log(`Retrieved credential exchange record ${credExId} for wallet ${walletId}`);
+      this.logger.log(`Retrieved presentation exchange record ${presExId} for wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to get credential exchange record: ${msg}`);
+      this.logger.error(`Failed to get presentation exchange record: ${msg}`);
       
       if (error.response?.status === 404) {
-        throw new NotFoundException(`Credential exchange record ${credExId} not found`);
+        throw new NotFoundException(`Presentation exchange record ${presExId} not found`);
       }
 
       throw new HttpException(
-        `Failed to get credential exchange record: ${msg}`,
+        `Failed to get presentation exchange record: ${msg}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  async storeCredential(walletId: string, credExId: string, credentialId?: string) {
+  async sendPresentation(walletId: string, presExId: string, presentationSpec: any) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
-      const payload = credentialId ? { credential_id: credentialId } : {};
+      const response = await axiosInstance.post(
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/send-presentation`,
+        presentationSpec,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      this.logger.log(`Sent presentation for exchange record ${presExId} from wallet ${walletId}`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to send presentation: ${msg}`);
+      throw new HttpException(
+        `Failed to send presentation: ${msg}`,
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async sendPresentationRequest(walletId: string, connectionId: string, presentationRequest: any) {
+    try {
+      const tokenResponse = await this.walletService.getAuthToken(walletId);
+      const token = tokenResponse.token;
+
+      const payload = {
+        connection_id: connectionId,
+        presentation_request: presentationRequest,
+      };
 
       const response = await axiosInstance.post(
-        `${this.ACAPY_ADMIN_URL}/issue-credential-2.0/records/${credExId}/store`,
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/send-request`,
         payload,
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
 
-      this.logger.log(`Stored credential from exchange record ${credExId} for wallet ${walletId}`);
+      this.logger.log(`Sent presentation request to connection ${connectionId} from wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to store credential: ${msg}`);
+      this.logger.error(`Failed to send presentation request: ${msg}`);
       throw new HttpException(
-        `Failed to store credential: ${msg}`,
+        `Failed to send presentation request: ${msg}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
   }
 
-  async sendProblemReport(walletId: string, credExId: string, description: string) {
+  async verifyPresentation(walletId: string, presExId: string) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
       const response = await axiosInstance.post(
-        `${this.ACAPY_ADMIN_URL}/issue-credential-2.0/records/${credExId}/problem-report`,
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/verify-presentation`,
+        {},
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      this.logger.log(`Verified presentation for exchange record ${presExId} in wallet ${walletId}`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to verify presentation: ${msg}`);
+      throw new HttpException(
+        `Failed to verify presentation: ${msg}`,
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async getCredentialsForPresentationRequest(walletId: string, presExId: string) {
+    try {
+      const tokenResponse = await this.walletService.getAuthToken(walletId);
+      const token = tokenResponse.token;
+
+      const response = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/credentials`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      this.logger.log(`Retrieved credentials for presentation request ${presExId} in wallet ${walletId}`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to get credentials for presentation request: ${msg}`);
+      throw new HttpException(
+        `Failed to get credentials for presentation request: ${msg}`,
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async sendProblemReport(walletId: string, presExId: string, description: string) {
+    try {
+      const tokenResponse = await this.walletService.getAuthToken(walletId);
+      const token = tokenResponse.token;
+
+      const response = await axiosInstance.post(
+        `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/problem-report`,
         { description },
         {
           headers: { Authorization: `Bearer ${token}` },
         },
       );
 
-      this.logger.log(`Sent problem report for credential exchange record ${credExId} from wallet ${walletId}`);
+      this.logger.log(`Sent problem report for presentation exchange record ${presExId} from wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data || error.message || 'Unknown error';
       this.logger.error(`Failed to send problem report: ${msg}`);
       throw new HttpException(
         `Failed to send problem report: ${msg}`,
-        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  async removeCredential(walletId: string, credentialId: string) {
-    try {
-      const tokenResponse = await this.walletService.getAuthToken(walletId);
-      const token = tokenResponse.token;
-
-      const response = await axiosInstance.delete(
-        `${this.ACAPY_ADMIN_URL}/credential/${credentialId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        },
-      );
-
-      this.logger.log(`Removed credential ${credentialId} from wallet ${walletId}`);
-      return response.data;
-    } catch (error: any) {
-      const msg = error.response?.data || error.message || 'Unknown error';
-      this.logger.error(`Failed to remove credential: ${msg}`);
-      throw new HttpException(
-        `Failed to remove credential: ${msg}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }

@@ -100,4 +100,113 @@ export class WalletService {
       throw new HttpException(`Failed to retrieve auth token: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
+
+  async listWallets() {
+    try {
+      const response = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/multitenancy/wallets`,
+      );
+
+      this.logger.log(`Retrieved ${response.data.results?.length || 0} wallets`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to list wallets: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to list wallets: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to list wallets: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async updateWallet(id: string, updates: any) {
+    try {
+      const response = await axiosInstance.put(
+        `${this.ACAPY_ADMIN_URL}/multitenancy/wallet/${id}`,
+        updates,
+      );
+
+      this.logger.log(`Wallet ${id} updated successfully`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to update wallet: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to update wallet: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to update wallet: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async removeWallet(id: string, walletKey?: string) {
+    try {
+      const payload = walletKey ? { wallet_key: walletKey } : {};
+      const response = await axiosInstance.delete(
+        `${this.ACAPY_ADMIN_URL}/multitenancy/wallet/${id}`,
+        { data: payload },
+      );
+
+      this.logger.log(`Wallet ${id} removed successfully`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to remove wallet: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to remove wallet: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to remove wallet: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
+
+  async getWalletStatus(id: string) {
+    try {
+      const tokenResponse = await this.getAuthToken(id);
+      const token = tokenResponse.token;
+
+      // Get basic wallet info
+      const walletInfo = await this.getWallet(id);
+
+      // Get connections count
+      const connectionsResponse = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/connections`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      // Get credentials count
+      const credentialsResponse = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/credentials`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      // Get DIDs
+      const didsResponse = await axiosInstance.get(
+        `${this.ACAPY_ADMIN_URL}/wallet/did`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+
+      const status = {
+        wallet_info: walletInfo,
+        statistics: {
+          connections_count: connectionsResponse.data.results?.length || 0,
+          credentials_count: credentialsResponse.data.results?.length || 0,
+          dids_count: didsResponse.data.results?.length || 0,
+        },
+        last_updated: new Date().toISOString(),
+      };
+
+      this.logger.log(`Retrieved status for wallet ${id}`);
+      return status;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to get wallet status: ${msg}`);
+      const status = error.response?.status;
+      if (status) {
+        throw new HttpException(`Failed to get wallet status: ${msg}`, status);
+      }
+      throw new HttpException(`Failed to get wallet status: ${msg}`, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
 }
