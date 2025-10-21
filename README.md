@@ -1,114 +1,372 @@
 
 # SSI Cloud Wallet
 
-[![Node.js](https://img.shields.io/badge/Node.js-16%2B-green)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org/)
 [![NestJS](https://img.shields.io/badge/NestJS-Framework-red)](https://nestjs.com/)
+[![React](https://img.shields.io/badge/React-18-blue)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Language-blue)](https://www.typescriptlang.org/)
+[![Prisma](https://img.shields.io/badge/Prisma-ORM-teal)](https://www.prisma.io/)
 
-> A production-ready NestJS microservice implementing a server-side cloud wallet for Self-Sovereign Identity (SSI) workflows, providing secure wallet management and credential lifecycle operations.
+> A full-stack Self-Sovereign Identity (SSI) wallet system with a NestJS backend and React frontend, enabling users to manage decentralized digital identities, issue and receive verifiable credentials, establish connections, and present proofs of claims.
 
-## Overview
+## 🌟 What is SSI Cloud Wallet?
 
-The SSI Cloud Wallet is an enterprise-grade microservice designed to facilitate Self-Sovereign Identity operations through a RESTful API. Built on the robust NestJS framework, it provides secure wallet creation, management, and webhook-based event handling for credential issuance and verification workflows.
+SSI Cloud Wallet is a complete digital identity management system that puts **you** in control of your personal data. Unlike traditional systems where companies store your information, SSI (Self-Sovereign Identity) lets you:
+
+- **Own Your Identity**: Create and manage your digital identity without relying on any central authority
+- **Control Your Data**: Decide what information to share and with whom
+- **Receive Credentials**: Get verifiable digital credentials (like a digital driver's license or degree certificate)
+- **Prove Claims**: Share proof of your credentials without revealing unnecessary information
+- **Establish Trust**: Connect with other people and organizations securely
+
+### 🎯 Real-World Example
+
+Imagine you need to prove you're over 18 to access a service:
+1. **Traditional Way**: Show your entire driver's license (revealing name, address, date of birth, license number, etc.)
+2. **SSI Way**: Share a cryptographic proof that you're over 18, without revealing your exact age, name, or any other information
 
 ### Key Features
 
-- **Wallet Management**: Complete CRUD operations for SSI wallets
-- **Credential Operations**: Support for credential issuance and verification
-- **Webhook Integration**: Real-time event processing for asynchronous operations
-- **Enterprise Security**: Production-ready security practices and error handling
-- **Scalable Architecture**: Modular design following NestJS best practices
-- **Comprehensive Testing**: Unit and end-to-end test coverage
+**🔐 Identity Management**
+- Create and manage multiple digital wallets
+- Generate unique DIDs (Decentralized Identifiers)
+- Secure wallet authentication with JWT tokens
+
+**🤝 Connection Management**
+- Establish secure peer-to-peer connections
+- Send and receive connection invitations
+- Manage your network of trusted connections
+
+**📜 Credential Lifecycle**
+- Receive credential offers from issuers
+- Accept and store verifiable credentials
+- View all your stored credentials
+- Real-time credential status updates
+
+**✅ Proof Presentations**
+- Receive proof requests from verifiers
+- Automatically match credentials to proof requirements
+- Send selective disclosure proofs
+- Accept or decline proof requests
+- Track proof verification status
+
+**🎨 User-Friendly Interface**
+- Modern React dashboard
+- Real-time updates and notifications
+- Intuitive navigation between wallets, connections, credentials, and proofs
+- Detailed debugging and logging
 
 ### Architecture
 
+This is a **full-stack application** with two main components:
+
+#### Backend (NestJS + Prisma + PostgreSQL)
+The backend handles all wallet operations and communicates with ACA-Py (Aries Cloud Agent Python):
+
 ```
 src/
-├── main.ts                    # Application entry point
-├── app.module.ts             # Root application module
-├── app.controller.ts         # Health check endpoints
-├── app.service.ts           # Core application services
-├── wallet/                  # Wallet management module
-│   ├── wallet.controller.ts # Wallet API endpoints
-│   ├── wallet.service.ts    # Business logic layer
-│   ├── wallet.module.ts     # Module configuration
-│   └── *.spec.ts           # Unit tests
-├── webhook/                 # Webhook handling module
-│   ├── webhook.controller.ts # Webhook endpoints
-│   ├── webhook.service.ts   # Event processing logic
-│   └── webhook.module.ts    # Module configuration
+├── main.ts                          # Application entry point
+├── app.module.ts                    # Root application module
+├── wallet/                          # Wallet management
+│   ├── wallet.controller.ts         # Wallet API endpoints
+│   ├── wallet.service.ts            # Create wallets, generate tokens
+│   └── dto/createWallet.dto.ts      # Data validation
+├── connection/                      # Connection management
+│   ├── connection.controller.ts     # Connection API endpoints
+│   ├── connection.service.ts        # Create invitations, accept connections
+│   └── dto/acceptInvite.dto.ts      # Data validation
+├── credential/                      # Credential management
+│   ├── credential.controller.ts     # Credential API endpoints
+│   ├── credential.service.ts        # Issue & receive credentials
+│   └── dto/wallet.dto.ts            # Data validation
+├── proof/                           # Proof presentation
+│   ├── proof.controller.ts          # Proof API endpoints
+│   ├── proof.service.ts             # Send & verify proofs
+│   └── dto/*.dto.ts                 # Data validation
+├── webhook/                         # Real-time event handling
+│   ├── webhook.controller.ts        # Webhook endpoints
+│   └── webhook.service.ts           # Process ACA-Py events
 └── utils/
-    └── axiosInstance.ts     # HTTP client configuration
+    └── axiosInstance.ts             # HTTP client configuration
+
+prisma/
+└── schema.prisma                    # Database schema definition
 ```
+
+#### Frontend (React + TypeScript + TailwindCSS)
+A modern, responsive web interface for interacting with your SSI wallet:
+
+```
+frontend/src/
+├── main.tsx                         # Application entry point
+├── App.tsx                          # Root component with routing
+├── pages/                           # Main application pages
+│   ├── WalletPage.tsx               # Wallet creation & management
+│   ├── ConnectionPage.tsx           # Manage connections
+│   ├── CredentialPage.tsx           # View & manage credentials
+│   ├── ProofPage.tsx                # Handle proof requests
+│   └── DashboardLayout.tsx          # Main layout wrapper
+├── services/                        # API communication
+│   ├── walletService.ts             # Wallet API calls
+│   ├── connectionService.ts         # Connection API calls
+│   ├── credentialService.ts         # Credential API calls
+│   └── proofService.ts              # Proof API calls
+└── components/                      # Reusable UI components
+    ├── ui/Button.tsx
+    ├── ui/Card.tsx
+    ├── ui/Alert.tsx
+    └── ui/Loading.tsx
+```
+
+#### How It All Works Together
+
+1. **Frontend** → Makes API requests to the **Backend**
+2. **Backend** → Communicates with **ACA-Py** (the SSI agent)
+3. **ACA-Py** → Handles cryptographic operations and blockchain interactions
+4. **ACA-Py** → Sends real-time updates back to the **Backend** via webhooks
+5. **Backend** → Stores data in **PostgreSQL** via **Prisma**
+6. **Frontend** → Polls or receives updates to show the latest state
 
 ## Prerequisites
 
-- **Node.js**: Version 16.x or higher (LTS recommended)
-- **npm**: Version 8.x or higher (or Yarn 1.22+)
-- **ACA-Py Agent**: Compatible Aries Cloud Agent Python instance
-- **Docker**: Optional, for containerized deployment
+Before you start, make sure you have these installed:
 
-Verify your environment:
+- **Node.js**: Version 18.x or higher ([Download](https://nodejs.org/))
+- **npm**: Version 9.x or higher (comes with Node.js)
+- **PostgreSQL**: Database server ([Download](https://www.postgresql.org/download/))
+- **Docker & Docker Compose**: For running ACA-Py agent ([Download](https://www.docker.com/))
+- **Git**: For cloning the repository
+
+Verify your installations:
 
 ```bash
-node --version
-npm --version
+node --version    # Should show v18.x.x or higher
+npm --version     # Should show 9.x.x or higher
+docker --version  # Should show Docker version
+psql --version    # Should show PostgreSQL version
 ```
 
-## Quick Start
+## 🚀 Quick Start Guide
 
-### Installation
-
-1. Clone the repository and install dependencies:
+### Step 1: Clone and Install
 
 ```bash
+# Clone the repository
 git clone https://github.com/SagarKarmoker/ssi-cloud-wallet.git
 cd ssi-cloud-wallet
+
+# Install backend dependencies
 npm install
+
+# Install frontend dependencies
+cd frontend
+npm install
+cd ..
 ```
 
-2. Configure environment variables:
+### Step 2: Set Up the Database
+
+1. Create a PostgreSQL database:
 
 ```bash
-cp .env.example .env
-# Edit .env with your configuration
+# Connect to PostgreSQL
+psql -U postgres
+
+# Create database
+CREATE DATABASE ssi_wallet;
+\q
 ```
 
-3. Start the development server:
+2. Configure the database connection:
+
+Create a `.env` file in the project root:
 
 ```bash
+# Database Configuration
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/ssi_wallet"
+
+# Server Configuration
+PORT=5001
+
+# ACA-Py Agent Configuration
+ACAPY_ADMIN_URL=http://localhost:8031
+
+# Webhook Configuration (you'll set this up later with ngrok)
+WALLET_WEBHOOK_URL=https://your-ngrok-url.ngrok.io/api/webhooks
+```
+
+3. Run database migrations:
+
+```bash
+npx prisma migrate dev
+npx prisma generate
+```
+
+### Step 3: Start ACA-Py Agent with Docker
+
+The ACA-Py agent is the core SSI engine. Start it using Docker Compose:
+
+```bash
+# Make sure Docker Desktop is running first
+
+# Start ACA-Py in the background
+docker-compose up -d
+
+# Check if it's running
+docker ps
+```
+
+You should see the ACA-Py container running on port 8031.
+
+### Step 4: Set Up Webhook URL (for Development)
+
+ACA-Py needs to send real-time events to your backend. Since you're running locally, use ngrok to expose your server:
+
+```bash
+# Install ngrok (if you haven't already)
+# Download from https://ngrok.com/download
+
+# Start ngrok on port 5001 (your backend port)
+ngrok http 5001
+```
+
+Copy the HTTPS URL (e.g., `https://abc123.ngrok.io`) and update your `.env` file:
+
+```bash
+WALLET_WEBHOOK_URL=https://abc123.ngrok.io/api/webhooks
+```
+
+### Step 5: Start the Backend Server
+
+```bash
+# Development mode with hot reload
 npm run start:dev
 ```
 
-The service will be available at [http://localhost:3000](http://localhost:3000).
+The backend will be available at [http://localhost:5001](http://localhost:5001).
 
-### Verification
+### Step 6: Start the Frontend
 
-Test the health endpoint:
+In a new terminal:
 
 ```bash
-curl http://localhost:3000/health
+cd frontend
+npm run dev
 ```
 
-## API Endpoints
+The frontend will be available at [http://localhost:5173](http://localhost:5173).
+
+### Step 7: Verify Everything is Working
+
+1. **Backend Health Check**: Visit [http://localhost:5001/health](http://localhost:5001/health)
+2. **Frontend**: Visit [http://localhost:5173](http://localhost:5173)
+3. **ACA-Py Admin**: Visit [http://localhost:8031](http://localhost:8031)
+4. **Database**: Run `npx prisma studio` to view your database
+
+🎉 **You're all set!** You can now create wallets, establish connections, and manage credentials!
+
+## 📖 How to Use the SSI Cloud Wallet
+
+### Creating Your First Wallet
+
+1. Open [http://localhost:5173](http://localhost:5173)
+2. Navigate to **"Wallets"** in the sidebar
+3. Click **"Create New Wallet"**
+4. Enter a wallet name (e.g., "My Personal Wallet")
+5. Click **"Create Wallet"**
+6. Your wallet is created! You'll see:
+   - Wallet ID
+   - DID (Decentralized Identifier)
+   - Verification Key
+
+### Establishing a Connection
+
+To receive credentials or proof requests, you need to connect with other agents:
+
+1. Navigate to **"Connections"**
+2. Click **"Create Invitation"**
+3. Copy the invitation URL or QR code
+4. Share it with another SSI agent
+5. When they accept, you'll see the connection in "Active Connections"
+
+**Or accept an invitation:**
+1. Click **"Accept Invitation"**
+2. Paste the invitation URL
+3. The connection will be established automatically
+
+### Receiving and Managing Credentials
+
+When someone sends you a credential offer:
+
+1. Navigate to **"Credentials"**
+2. You'll see the credential offer in the "Offers" section
+3. Click **"Accept"** to receive the credential
+4. Once accepted, it will appear in "Stored Credentials"
+5. Click **"View Details"** to see the credential attributes
+
+### Handling Proof Requests
+
+When a verifier requests proof of your credentials:
+
+1. Navigate to **"Proof Requests"**
+2. You'll see incoming proof requests in the "Received Requests" tab
+3. Click **"Send Proof"** to automatically:
+   - Match your stored credentials to the request
+   - Build the proof presentation
+   - Send it to the verifier
+4. Or click **"Decline"** to reject the request
+5. Track verification status in real-time
+
+The system automatically:
+- Finds matching credentials in your wallet
+- Checks if you have the required attributes
+- Builds the cryptographic proof
+- Sends it securely to the verifier
+
+## 🔌 API Endpoints
 
 ### Wallet Management
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/wallet/create` | Create a new wallet |
-| `GET` | `/api/wallet/:id` | Retrieve wallet details |
-| `POST` | `/api/wallet/:id/token` | Generate authentication token |
+| Method | Endpoint | Description | Request Body |
+|--------|----------|-------------|--------------|
+| `POST` | `/api/wallet/create` | Create a new wallet | `{ "walletName": "string" }` |
+| `GET` | `/api/wallet` | Get all wallets | - |
+| `GET` | `/api/wallet/:id` | Get wallet by ID | - |
+| `GET` | `/api/wallet/:id/did` | Get wallet DID | - |
+| `POST` | `/api/wallet/:id/token` | Generate auth token | - |
 
-### Webhook Handlers
+### Connection Management
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/webhooks/*` | Process SSI event notifications |
+| Method | Endpoint | Description | Request Body |
+|--------|----------|-------------|--------------|
+| `POST` | `/api/connection/:walletId/create-invitation` | Create connection invitation | - |
+| `POST` | `/api/connection/:walletId/accept-invitation` | Accept connection invitation | `{ "invitationUrl": "string" }` |
+| `GET` | `/api/connection/:walletId/connections` | Get all connections | - |
 
-## Development
+### Credential Operations
+
+| Method | Endpoint | Description | Request Body |
+|--------|----------|-------------|--------------|
+| `GET` | `/api/credential/:walletId/exchanges` | Get credential exchanges | - |
+| `GET` | `/api/credential/:walletId/credentials` | Get stored credentials | - |
+| `POST` | `/api/credential/:walletId/exchange/:exchangeId/send-request` | Accept credential offer | - |
+| `POST` | `/api/credential/:walletId/exchange/:exchangeId/store` | Store credential | - |
+
+### Proof Presentations
+
+| Method | Endpoint | Description | Request Body |
+|--------|----------|-------------|--------------|
+| `GET` | `/api/proof/:walletId/presentation-exchanges` | Get all proof requests | - |
+| `GET` | `/api/proof/:walletId/presentation-exchange/:presExId` | Get specific proof request | - |
+| `GET` | `/api/proof/:walletId/presentation-exchange/:presExId/credentials` | Get matching credentials | - |
+| `POST` | `/api/proof/:walletId/presentation-exchange/:presExId/send-presentation` | Send proof presentation | `{ "indy": {...} }` |
+| `POST` | `/api/proof/:walletId/presentation-exchange/:presExId/problem-report` | Decline proof request | `{ "description": "string" }` |
+
+## 🛠️ Development
 
 ### Available Scripts
+
+#### Backend
 
 | Command | Description |
 |---------|-------------|
@@ -117,75 +375,172 @@ curl http://localhost:3000/health
 | `npm run build` | Compile TypeScript |
 | `npm run test` | Execute unit tests |
 | `npm run test:e2e` | Run end-to-end tests |
-| `npm run test:cov` | Generate test coverage |
 | `npm run lint` | Lint source code |
 
-### Project Structure
+#### Frontend
 
-The application follows NestJS architectural patterns:
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Build for production |
+| `npm run preview` | Preview production build |
+| `npm run lint` | Lint source code |
 
-- **Controllers**: Handle HTTP requests and responses
-- **Services**: Implement business logic and external integrations
-- **Modules**: Organize related functionality
-- **Utils**: Shared utilities and configurations
+#### Database
 
-## Configuration
+| Command | Description |
+|---------|-------------|
+| `npx prisma migrate dev` | Create and apply migrations |
+| `npx prisma studio` | Open database GUI |
+| `npx prisma generate` | Generate Prisma Client |
+
+### Project Structure Explained
+
+**Backend (NestJS)**
+- **Controllers**: Handle HTTP requests, validate input, return responses
+- **Services**: Contain business logic, communicate with ACA-Py
+- **DTOs**: Define data structures and validation rules
+- **Modules**: Group related controllers and services
+
+**Frontend (React)**
+- **Pages**: Full-page components for each section
+- **Services**: API communication layer
+- **Components**: Reusable UI elements
+- **Types**: TypeScript interfaces and types
+
+### Understanding the SSI Flow
+
+#### 1. Credential Issuance Flow
+```
+Issuer → Offers Credential → Holder Accepts → Credential Stored
+```
+1. Issuer creates a credential offer
+2. Offer appears in holder's wallet
+3. Holder accepts the offer
+4. Credential is cryptographically signed and stored
+
+#### 2. Proof Presentation Flow
+```
+Verifier → Requests Proof → Holder Sends Proof → Verifier Validates
+```
+1. Verifier sends a proof request (e.g., "Prove you're over 18")
+2. Holder's wallet finds matching credentials
+3. Wallet creates zero-knowledge proof
+4. Verifier cryptographically validates the proof
+
+#### 3. Connection Flow
+```
+Agent A → Creates Invitation → Agent B Accepts → Connection Established
+```
+1. One agent creates an invitation (URL or QR code)
+2. Other agent scans/accepts the invitation
+3. DIDComm protocol establishes secure connection
+4. Agents can now exchange credentials and proofs
+
+## ⚙️ Configuration
 
 ### Environment Variables
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root with these variables:
 
 ```bash
+# ========================================
+# Database Configuration
+# ========================================
+DATABASE_URL="postgresql://postgres:yourpassword@localhost:5432/ssi_wallet"
+
+# ========================================
 # Server Configuration
-PORT=3000
+# ========================================
+PORT=5001
 NODE_ENV=development
 
+# ========================================
 # ACA-Py Agent Configuration
+# ========================================
 ACAPY_ADMIN_URL=http://localhost:8031
 
+# ========================================
 # Webhook Configuration
+# ========================================
+# Use ngrok URL for local development
 WALLET_WEBHOOK_URL=https://your-ngrok-url.ngrok.io/api/webhooks
 
-# Optional: Database and External Services
-DATABASE_URL=postgresql://user:pass@localhost:5432/ssi_wallet
-REDIS_URL=redis://localhost:6379
+# For production, use your actual domain
+# WALLET_WEBHOOK_URL=https://api.yourdomain.com/api/webhooks
 ```
 
-### Security Considerations
+### Frontend Configuration
 
-- **Never commit** `.env` files or sensitive credentials to version control
-- Use environment-specific configuration files for different deployment stages
-- Implement proper secret management in production environments
+Create `frontend/.env` file:
+
+```bash
+# Backend API URL
+VITE_API_URL=http://localhost:5001
+```
+
+### Security Best Practices
+
+⚠️ **Important Security Notes:**
+
+- **Never commit** `.env` files to version control
+- Use strong, unique passwords for PostgreSQL
+- In production, use environment-specific secrets management (AWS Secrets Manager, Azure Key Vault, etc.)
 - Enable HTTPS for all external communications
+- Rotate authentication tokens regularly
 - Validate and sanitize all webhook payloads
+- Use rate limiting on API endpoints
+- Keep ACA-Py and dependencies updated
 
-## Testing
+## 🧪 Testing
 
 ### Running Tests
+
+#### Backend Tests
 
 ```bash
 # Unit tests
 npm run test
 
-# End-to-end tests
-npm run test:e2e
+# Watch mode for development
+npm run test:watch
 
 # Test coverage
 npm run test:cov
 
-# Watch mode for development
-npm run test:watch
+# End-to-end tests
+npm run test:e2e
+```
+
+#### Frontend Tests
+
+```bash
+cd frontend
+
+# Run tests
+npm run test
 ```
 
 ### Test Structure
 
+**Backend Tests**
 - **Unit Tests**: Located alongside source files (`*.spec.ts`)
-- **E2E Tests**: Located in the `test/` directory
-- **Mocking**: External services should be mocked for isolated testing
+- **E2E Tests**: Located in `test/` directory
+- **Mock Data**: External services (ACA-Py) are mocked
 
-## Deployment
+**What We Test**
+- Wallet creation and management
+- Connection establishment flows
+- Credential issuance and storage
+- Proof request handling
+- Webhook event processing
+- API endpoint validation
+
+## 🚀 Deployment
 
 ### Production Build
+
+#### Backend
 
 ```bash
 # Build the application
@@ -195,26 +550,79 @@ npm run build
 npm run start:prod
 ```
 
+#### Frontend
+
+```bash
+cd frontend
+
+# Build for production
+npm run build
+
+# The build output will be in frontend/dist
+```
+
 ### Docker Deployment
 
+Create a `Dockerfile` for the backend:
+
 ```dockerfile
-FROM node:18-alpine
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
+COPY prisma ./prisma/
+RUN npm ci
 
-COPY dist ./dist
-EXPOSE 3000
+COPY . .
+RUN npm run build
+RUN npx prisma generate
 
-CMD ["node", "dist/main"]
+FROM node:18-alpine
+
+WORKDIR /app
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+COPY package*.json ./
+
+EXPOSE 5001
+
+CMD ["npm", "run", "start:prod"]
+```
+
+Build and run:
+
+```bash
+# Build the image
+docker build -t ssi-cloud-wallet-backend .
+
+# Run the container
+docker run -p 5001:5001 \
+  -e DATABASE_URL="postgresql://user:pass@host/db" \
+  -e ACAPY_ADMIN_URL="http://acapy:8031" \
+  ssi-cloud-wallet-backend
 ```
 
 ### Environment-Specific Deployment
 
-- **Development**: Use `npm run start:dev` with hot reload
-- **Staging**: Deploy with `NODE_ENV=staging` and staging configurations
-- **Production**: Use compiled build with `NODE_ENV=production`
+**Development**
+- Use `npm run start:dev` with hot reload
+- Enable detailed logging
+- Use ngrok for webhook URLs
+
+**Staging**
+- Deploy with `NODE_ENV=staging`
+- Use staging database
+- Test with staging ACA-Py instance
+
+**Production**
+- Use compiled build with `NODE_ENV=production`
+- Enable HTTPS
+- Use production-grade database (managed PostgreSQL)
+- Implement proper monitoring and logging
+- Use secrets management service
+- Set up load balancer
+- Enable automatic backups
 
 ## Monitoring and Observability
 
@@ -261,36 +669,149 @@ GET /health/live   # Liveness probe
 - Link related issues or documentation
 - Request review from maintainers
 
-## Troubleshooting
+## 🐛 Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-#### Port Already in Use
+#### ❌ Port Already in Use
 
+**Problem**: Backend fails to start with "Port 5001 already in use"
+
+**Solution**:
 ```bash
-# Find process using port 3000
-lsof -ti:3000 | xargs kill -9
+# Windows (PowerShell)
+Get-Process -Id (Get-NetTCPConnection -LocalPort 5001).OwningProcess | Stop-Process
+
+# macOS/Linux
+lsof -ti:5001 | xargs kill -9
 ```
 
-#### ACA-Py Connection Issues
+#### ❌ Database Connection Failed
 
-- Verify `ACAPY_ADMIN_URL` is correct
-- Ensure ACA-Py agent is running and accessible
-- Check network connectivity and firewall settings
+**Problem**: "Cannot connect to database"
 
-#### Webhook Delivery Failures
+**Solutions**:
+1. Verify PostgreSQL is running:
+   ```bash
+   # Check PostgreSQL status
+   pg_isready
+   
+   # Start PostgreSQL (if stopped)
+   # Windows: Start PostgreSQL service in Services app
+   # macOS: brew services start postgresql
+   # Linux: sudo systemctl start postgresql
+   ```
 
-- Validate `WALLET_WEBHOOK_URL` is publicly accessible
-- Check webhook endpoint availability
-- Review webhook payload format and authentication
+2. Check your `DATABASE_URL` in `.env`
+3. Verify database exists: `psql -U postgres -l`
+4. Run migrations: `npx prisma migrate dev`
+
+#### ❌ ACA-Py Connection Issues
+
+**Problem**: Backend can't connect to ACA-Py
+
+**Solutions**:
+1. Verify Docker is running: `docker ps`
+2. Check ACA-Py container status: `docker-compose ps`
+3. Restart ACA-Py: `docker-compose restart`
+4. Check ACA-Py logs: `docker-compose logs -f`
+5. Verify `ACAPY_ADMIN_URL` in `.env` matches container port
+
+#### ❌ Webhook Delivery Failures
+
+**Problem**: Webhooks not being received
+
+**Solutions**:
+1. Check if ngrok is running: `ngrok http 5001`
+2. Update `WALLET_WEBHOOK_URL` in `.env` with current ngrok URL
+3. Restart backend after updating webhook URL
+4. Test webhook endpoint: `curl https://your-ngrok-url.ngrok.io/api/webhooks/connections`
+
+#### ❌ Frontend Can't Connect to Backend
+
+**Problem**: API requests failing in frontend
+
+**Solutions**:
+1. Verify backend is running on port 5001
+2. Check `VITE_API_URL` in `frontend/.env`
+3. Check browser console for CORS errors
+4. Verify backend health: `curl http://localhost:5001/health`
+
+#### ❌ Prisma Migration Errors
+
+**Problem**: Migration fails or database out of sync
+
+**Solutions**:
+```bash
+# Reset database (⚠️ will delete all data)
+npx prisma migrate reset
+
+# Generate Prisma Client
+npx prisma generate
+
+# Apply migrations
+npx prisma migrate dev
+```
+
+#### ❌ "No Matching Credentials" Error
+
+**Problem**: Can't send proof even though you have credentials
+
+**Possible Causes**:
+1. Credential schema doesn't match proof request requirements
+2. Credential definition ID mismatch
+3. Required attributes not present in stored credentials
+
+**Solution**:
+- Check browser console for detailed matching logs
+- Verify stored credentials have the required attributes
+- Ensure credential was issued with the correct schema
 
 ### Debug Mode
 
-Enable debug logging:
+Enable detailed logging:
 
+**Backend**:
 ```bash
-DEBUG=* npm run start:dev
+# In .env
+NODE_ENV=development
+LOG_LEVEL=debug
 ```
+
+**Frontend**:
+Open browser DevTools (F12) and check:
+- Console tab for detailed logs
+- Network tab for API requests
+- Application tab for stored data
+
+### Getting Help
+
+If you're still stuck:
+
+1. **Check Logs**:
+   - Backend: Check terminal where `npm run start:dev` is running
+   - ACA-Py: `docker-compose logs -f`
+   - Frontend: Browser DevTools Console
+
+2. **Verify Setup**:
+   ```bash
+   # Check all services
+   node --version          # Should be v18+
+   npm --version           # Should be v9+
+   docker --version        # Docker installed
+   psql --version          # PostgreSQL installed
+   npx prisma studio       # Database accessible
+   ```
+
+3. **Common Checklist**:
+   - [ ] PostgreSQL is running
+   - [ ] Database migrations applied
+   - [ ] Docker is running
+   - [ ] ACA-Py container is up
+   - [ ] ngrok is running (for webhooks)
+   - [ ] `.env` file configured correctly
+   - [ ] Backend running on port 5001
+   - [ ] Frontend running on port 5173
 
 ## License
 
