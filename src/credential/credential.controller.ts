@@ -18,6 +18,15 @@ export class CredentialController {
     return this.credentialService.listCredentials(walletId, wql);
   }
 
+  @Get(':walletId/credentials/w3c')
+  @ApiOperation({ summary: 'List all W3C/JSON-LD credentials in wallet' })
+  @ApiResponse({ status: 200, description: 'W3C credentials retrieved successfully' })
+  async listW3cCredentials(
+    @Param('walletId') walletId: string
+  ) {
+    return this.credentialService.listW3cCredentials(walletId);
+  }
+
   @Get(':walletId/credentials/:credentialId')
   @ApiOperation({ summary: 'Get credential details' })
   @ApiResponse({ status: 200, description: 'Credential details retrieved successfully' })

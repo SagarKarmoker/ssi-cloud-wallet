@@ -103,7 +103,424 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
            null;
   };
 
-  // Manual credential matching function
+  // Detect if a presentation request is DIF/JSON-LD based
+  const isDifPresentationRequest = (record: any) => {
+    const formats = record?.pres_request?.formats || record?.presentation_request?.formats || [];
+    if (Array.isArray(formats) && formats.some((f: any) => `${f.format || ''}`.toLowerCase().includes('dif'))) {
+      return true;
+    }
+    const attachments = record?.pres_request?.['request_presentations~attach'] || record?.presentation_request?.['request_presentations~attach'] || [];
+    if (attachments.length > 0) {
+      const data = attachments[0]?.data;
+      const json = data?.json;
+      if (json && (json.presentation_definition || json.input_descriptors)) return true;
+      if (data?.base64) {
+        try {
+          const decoded = atob(data.base64);
+          const parsed = JSON.parse(decoded);
+          if (parsed.presentation_definition || parsed.input_descriptors) return true;
+        } catch {}
+      }
+    }
+    return false;
+  };
+
+  // Extract presentation definition (DIF) from record
+  const extractPresentationDefinition = (record: any) => {
+    const attachments = record?.pres_request?.['request_presentations~attach'] || record?.presentation_request?.['request_presentations~attach'] || [];
+    if (attachments.length > 0) {
+      const data = attachments[0]?.data;
+      if (data?.json && (data.json.presentation_definition || data.json.input_descriptors)) {
+        return data.json.presentation_definition || { input_descriptors: data.json.input_descriptors, id: data.json.id };
+      }
+      if (data?.base64) {
+        try {
+          const decoded = atob(data.base64);
+          const parsed = JSON.parse(decoded);
+          if (parsed.presentation_definition || parsed.input_descriptors) {
+            return parsed.presentation_definition || { input_descriptors: parsed.input_descriptors, id: parsed.id };
+          }
+        } catch {}
+      }
+    }
+    return null;
+  };
+
+  // Manual JSON-LD (DIF) credential matching
+  const attemptManualJsonLdMatching = (record: any, storedCredentials: any[]) => {
+    const presentationDefinition = extractPresentationDefinition(record);
+    console.log('🔍 JSON-LD Presentation Definition:', presentationDefinition);
+    
+    if (!presentationDefinition || !Array.isArray(presentationDefinition.input_descriptors)) {
+      console.error('❌ Invalid or missing presentation definition');
+      return { canFulfill: false, presentation: {}, matchingDetails: [] };
+    }
+
+    const mappings: { input_descriptor_id: string; record_id: string }[] = [];
+    const matchingDetails: any[] = [];
+
+    console.log('📦 Stored W3C credentials to match:', storedCredentials);
+    console.log('📦 Raw credentials structure:', JSON.stringify(storedCredentials, null, 2));
+
+    // Normalize stored W3C credentials to extract record_id and helpful metadata
+    const normalizeCred = (cred: any, index: number) => {
+      console.log(`\n🔍 Processing credential ${index + 1}:`, cred);
+      
+      // W3C credentials structure from ACA-Py can be:
+      // Option 1: { record_id, cred_value: { credential: {...} } }
+      // Option 2: Direct credential object
+      const recordId = cred.record_id || cred.credential_id || cred.referent || cred.cred_id;
+      
+      // Try different paths to find the actual credential
+      let credential = cred;
+      if (cred.cred_value?.credential) {
+        credential = cred.cred_value.credential;
+      } else if (cred.cred_value) {
+        credential = cred.cred_value;
+      } else if (cred.credential) {
+        credential = cred.credential;
+      }
+      
+      const type = credential.type || credential['@type'] || [];
+      const subject = credential.credentialSubject || credential['@credentialSubject'] || {};
+      
+      console.log(`  📄 Extracted data for credential ${index + 1}:`, {
+        recordId,
+        type,
+        subject,
+        subjectKeys: Object.keys(subject),
+        hasCredValue: !!cred.cred_value,
+        credValueKeys: cred.cred_value ? Object.keys(cred.cred_value) : [],
+        topLevelKeys: Object.keys(cred)
+      });
+      
+      return { recordId, type, subject, credential, raw: cred };
+    };
+
+    const normalizedCreds = storedCredentials.map(normalizeCred);
+    
+    console.log(`✅ Normalized ${normalizedCreds.length} W3C credentials`);
+
+    presentationDefinition.input_descriptors.forEach((descriptor: any, index: number) => {
+      const id = descriptor.id || `input-${index + 1}`;
+      const fields = descriptor.constraints?.fields || [];
+      const schemaList = descriptor.schema || descriptor.schemas || [];
+      const schemaUris = Array.isArray(schemaList)
+        ? schemaList.map((s: any) => s.uri || s.id || s)
+        : (schemaList?.uri ? [schemaList.uri] : []);
+
+      console.log(`\n🔍 Looking for match for input descriptor "${id}":`, {
+        schemaUris,
+        fieldsCount: fields.length,
+        fields
+      });
+
+      const matches = normalizedCreds.find((cred) => {
+        console.log(`  🔍 Trying to match credential:`, {
+          recordId: cred.recordId,
+          type: cred.type,
+          subjectKeys: Object.keys(cred.subject)
+        });
+
+        // Try schema/type matching first
+        if (schemaUris.length > 0 && Array.isArray(cred.type)) {
+          const typeSet = new Set(cred.type.map((t: any) => `${t}`.toLowerCase()));
+          const schemaMatch = schemaUris.some((uri: string) => 
+            typeSet.has(`${uri}`.toLowerCase()) || 
+            `${uri}`.toLowerCase().includes('verifiablecredential')
+          );
+          if (schemaMatch) {
+            console.log(`  ✅ Type match found for ${id}: ${cred.type.join(', ')}`);
+            return true;
+          }
+        }
+        
+        // Then check constraints.fields paths roughly (credentialSubject keys)
+        if (fields.length > 0) {
+          if (!cred.subject || typeof cred.subject !== 'object' || Object.keys(cred.subject).length === 0) {
+            console.log(`  ⚠️ Credential has no valid subject, skipping field checks`);
+          } else {
+            const subjectKeys = new Set(Object.keys(cred.subject));
+            console.log(`  🔍 Checking ${fields.length} fields against subject keys:`, Array.from(subjectKeys));
+            
+            const requiredOk = fields.every((f: any) => {
+              const pathArr = Array.isArray(f.path) ? f.path : [f.path];
+              console.log(`    🔍 Checking field paths:`, pathArr);
+              
+              // Check simple $.credentialSubject.<attr> paths
+              const matched = pathArr.some((p: string) => {
+                // Try different path patterns
+                const patterns = [
+                  /\$\.credentialSubject\.(\w+)/,           // $.credentialSubject.givenName
+                  /credentialSubject\.(\w+)/,                // credentialSubject.givenName
+                  /^(\w+)$/                                   // givenName (direct property)
+                ];
+                
+                for (const pattern of patterns) {
+                  const m = p.match(pattern);
+                  if (m && subjectKeys.has(m[1])) {
+                    console.log(`    ✅ Field match: ${m[1]} (pattern: ${pattern})`);
+                    return true;
+                  }
+                }
+                return false;
+              });
+              
+              if (!matched) {
+                console.log(`    ❌ No match for field paths:`, pathArr);
+              }
+              return matched;
+            });
+            
+            if (requiredOk) {
+              console.log(`  ✅ All ${fields.length} fields matched for ${id}`);
+              return true;
+            } else {
+              console.log(`  ❌ Not all fields matched for ${id}`);
+            }
+          }
+        }
+        
+        // Fallback: if no specific constraints, accept first available VC with record_id
+        if (schemaUris.length === 0 && fields.length === 0 && cred.recordId) {
+          console.log(`  ⚠️ Using fallback match (no constraints) for ${id}`);
+          return true;
+        }
+        
+        console.log(`  ❌ No match criteria satisfied for this credential`);
+        return false;
+      });
+
+      if (matches && matches.recordId) {
+        mappings.push({ input_descriptor_id: id, record_id: matches.recordId });
+        matchingDetails.push({ 
+          inputDescriptorId: id, 
+          recordId: matches.recordId, 
+          type: matches.type,
+          subjectKeys: Object.keys(matches.subject)
+        });
+        console.log(`  ✅ Matched descriptor "${id}" to record_id: ${matches.recordId}`);
+      } else {
+        console.log(`  ❌ No match found for descriptor "${id}"`);
+      }
+    });
+
+    const canFulfill = mappings.length === presentationDefinition.input_descriptors.length;
+    
+    // Build presentation spec with record_ids as an object (mapping), not array
+    // Format: { "input_descriptor_id": "record_id" }
+    const recordIdsMapping: Record<string, string> = {};
+    mappings.forEach(m => {
+      recordIdsMapping[m.input_descriptor_id] = m.record_id;
+    });
+    
+    const presentation = { 
+      dif: { 
+        record_ids: recordIdsMapping 
+      } 
+    };
+
+    console.log('\n📋 JSON-LD matching summary:');
+    console.log(`  Required descriptors: ${presentationDefinition.input_descriptors.length}`);
+    console.log(`  Matched descriptors: ${mappings.length}`);
+    console.log(`  Can fulfill: ${canFulfill ? '✅ YES' : '❌ NO'}`);
+    console.log('📋 Matching details:', matchingDetails);
+    console.log('🧾 Built DIF presentation spec:', presentation);
+
+    return { canFulfill, presentation, matchingDetails };
+  };
+
+  const handlePresentProof = async (presentationExchangeId: string) => {
+    try {
+      // Get the full presentation record first to detect format
+      const fullPresentationRecord = await proofService.getPresentationExchangeRecord(walletId, presentationExchangeId);
+      console.log('Full presentation exchange record:', fullPresentationRecord);
+
+      // If the request is DIF/JSON-LD, build and send a DIF presentation
+      if (isDifPresentationRequest(fullPresentationRecord)) {
+        console.log('🧩 Detected DIF/JSON-LD proof request. Fetching W3C credentials...');
+        
+        // Load W3C/JSON-LD credentials specifically for DIF proof requests
+        const w3cCredentialsResponse = await credentialService.getW3cCredentials(walletId);
+        console.log('W3C/JSON-LD credentials:', w3cCredentialsResponse);
+        
+        const w3cCredentials = w3cCredentialsResponse.results || w3cCredentialsResponse || [];
+        
+        if (!w3cCredentials || w3cCredentials.length === 0) {
+          setError('❌ No W3C/JSON-LD credentials found in wallet. Cannot fulfill this proof request.');
+          console.error('No W3C credentials available for JSON-LD proof request');
+          return;
+        }
+
+        const manualJsonLd = attemptManualJsonLdMatching(
+          fullPresentationRecord,
+          w3cCredentials
+        );
+
+        if (!manualJsonLd.canFulfill) {
+          setError('❌ Unable to satisfy JSON-LD presentation definition with your stored credentials. Check console for details.');
+          return;
+        }
+
+        try {
+          console.log('🚀 Sending DIF presentation:', JSON.stringify(manualJsonLd.presentation, null, 2));
+          const sendResult = await proofService.sendPresentation(walletId, presentationExchangeId, manualJsonLd.presentation);
+          console.log('✅ JSON-LD presentation sent. Result:', sendResult);
+          
+          // Warning about known ACA-Py limitation
+          console.warn('⚠️ KNOWN ISSUE: ACA-Py may not properly include credentials in DIF presentations using record_ids format.');
+          console.warn('⚠️ The presentation may be sent but arrive empty at the verifier.');
+          console.warn('⚠️ This is a limitation of ACA-Py\'s DIF/JSON-LD implementation, not this application.');
+          console.warn('⚠️ For production use, consider using Indy AnonCreds instead.');
+          
+          setError('⚠️ JSON-LD presentation sent, but may arrive empty due to ACA-Py limitations. Use Indy proofs for production.');
+          setTimeout(async () => { await loadProofRequests(); }, 3000);
+          return;
+        } catch (difErr: any) {
+          console.error('❌ JSON-LD presentation failed:', difErr);
+          console.error('❌ API response:', difErr.response?.data);
+          setError('❌ Failed to send JSON-LD presentation. See console for details.');
+          return;
+        }
+      }
+
+      // Indy path: use available credentials endpoint
+      console.log('Getting credentials for presentation request:', presentationExchangeId);
+      
+      // Load stored Indy credentials from wallet
+      const actualStoredCredentials = await credentialService.getCredentials(walletId);
+      console.log('Stored Indy credentials:', actualStoredCredentials);
+      
+      const credentialsResponse = await proofService.getCredentialsForPresentationRequest(walletId, presentationExchangeId);
+      console.log('Credentials response:', credentialsResponse);
+      console.log('Credentials response type:', typeof credentialsResponse);
+      console.log('Credentials response keys:', Object.keys(credentialsResponse || {}));
+      
+      if (!credentialsResponse || !credentialsResponse.results || credentialsResponse.results.length === 0) {
+        // Let's check what stored credentials we have and what the credentials API is returning
+        console.log('No matching credentials found. Let\'s debug this...');
+        try {
+          // Check both the proof credentials API response and our stored credentials
+          console.log('Credentials API Response:', credentialsResponse);
+          
+          // Also check what credentials we have stored in our wallet
+          const allCredentialExchanges = await credentialService.getCredentialExchanges(walletId);
+          console.log('All credential exchanges:', allCredentialExchanges);
+          
+          const storedCredentials = (allCredentialExchanges.results || []).filter((cred: any) => 
+            cred.state === 'stored' && cred.credential
+          );
+          console.log('Stored credentials that should be usable:', storedCredentials);
+          
+          // Also check the actual stored credentials endpoint
+          // (already fetched above as actualStoredCredentials)
+          console.log('Actual stored credentials from credentials API:', actualStoredCredentials);
+          
+          const totalStoredCredentials = (actualStoredCredentials.results || actualStoredCredentials || []).length;
+          
+          // Show detailed comparison for debugging
+          console.log('=== DETAILED MISMATCH ANALYSIS ===');
+          const currentProofRequest = proofRequests.find(req => getExchangeId(req) === presentationExchangeId);
+          if (currentProofRequest?.presentation_request?.requested_attributes) {
+            const requestedAttrs = currentProofRequest.presentation_request.requested_attributes;
+            console.log('VERIFIER IS REQUESTING:');
+            Object.entries(requestedAttrs).forEach(([key, attr]: [string, any]) => {
+              console.log(`  - Attribute "${key}":`, {
+                name: attr.name,
+                names: attr.names,
+                restrictions: attr.restrictions
+              });
+            });
+          }
+          
+          console.log('YOUR STORED CREDENTIALS CONTAIN:');
+          (actualStoredCredentials.results || actualStoredCredentials || []).forEach((cred: any, index: number) => {
+            console.log(`  Credential ${index + 1}:`, {
+              schema_id: cred.schema_id,
+              cred_def_id: cred.cred_def_id,
+              type: cred.type,
+              attributes: Object.keys(cred.attrs || cred.attributes || cred.credential?.credentialSubject || {}),
+              attribute_values: cred.attrs || cred.attributes || cred.credential?.credentialSubject
+            });
+          });
+          
+          if (totalStoredCredentials === 0) {
+            setError('❌ You need to have stored credentials first! Go to the Credentials page and accept some credential offers, then return to respond to this proof request.');
+          } else {
+            setError(`❌ Schema/Attribute Mismatch: You have ${totalStoredCredentials} stored credentials, but none match what the verifier is requesting. Check the console for detailed comparison. This might be due to strict schema matching in ACA-Py.`);
+            
+            // Manual credential matching - check cred_def_id matches (Indy)
+            console.log('🔧 ATTEMPTING MANUAL CREDENTIAL MATCHING...');
+            const manualMatch = attemptManualCredentialMatching(
+              fullPresentationRecord, 
+              actualStoredCredentials.results || actualStoredCredentials || []
+            );
+          
+            if (manualMatch.canFulfill) {
+              console.log('✅ Manual matching found compatible credentials!');
+              console.log('Manually built presentation:', manualMatch.presentation);
+              
+              // Try to send the manually built presentation
+              try {
+                console.log('🚀 SENDING PRESENTATION TO ACA-PY:', JSON.stringify(manualMatch.presentation, null, 2));
+                const sendResult = await proofService.sendPresentation(walletId, presentationExchangeId, manualMatch.presentation);
+                console.log('✅ Presentation sent successfully! Result:', sendResult);
+                setError('✅ Proof presentation sent successfully using manual credential matching!');
+                
+                // Wait a bit for the state to update, then reload
+                setTimeout(async () => {
+                  await loadProofRequests();
+                }, 1500);
+                return;
+              } catch (manualSendError: any) {
+                console.error('❌ Manual presentation failed:', manualSendError);
+                console.error('❌ Full error response:', manualSendError.response?.data);
+                console.error('❌ Error status:', manualSendError.response?.status);
+                console.error('❌ Error message from API:', JSON.stringify(manualSendError.response?.data, null, 2));
+                setError('❌ Failed to send manual Indy presentation. See console for details.');
+                return;
+              }
+            }
+          }
+        } catch (debugErr) {
+          console.error('Error during mismatch analysis:', debugErr);
+          setError('❌ Error during credential analysis. See console for details.');
+        }
+      } else {
+        // If ACA-Py returned direct matches, try to build a standard indy presentation automatically
+        try {
+          const matchingCreds = credentialsResponse.results;
+          if (Array.isArray(matchingCreds) && matchingCreds.length > 0) {
+            console.log('✅ Found matching credentials. Building standard Indy presentation...');
+            const presentation: any = { indy: { requested_attributes: {}, requested_predicates: {}, self_attested_attributes: {} } };
+            // Naively map by referent if available
+            matchingCreds.forEach((mc: any) => {
+              const credId = mc.referent || mc.credential_id || mc.record_id;
+              if (credId) {
+                // We don't have the attribute referents from here; keep as-is or rely on ACA-Py to accept structure.
+                // Since auto-building without attribute keys is risky, fall back to manual extraction from full record
+              }
+            });
+            // Fallback to manual if above didn't populate
+            const manual = attemptManualCredentialMatching(fullPresentationRecord, actualStoredCredentials.results || actualStoredCredentials || []);
+            if (manual.canFulfill) {
+              console.log('🚀 SENDING AUTO-BUILT INDY PRESENTATION');
+              const sendRes = await proofService.sendPresentation(walletId, presentationExchangeId, manual.presentation);
+              console.log('✅ Indy presentation sent. Result:', sendRes);
+              setTimeout(async () => { await loadProofRequests(); }, 1500);
+              return;
+            }
+          }
+        } catch (autoErr) {
+          console.error('Auto-build indy presentation failed:', autoErr);
+        }
+      }
+    } catch (err) {
+      setError('Failed to send proof presentation');
+      console.error('Error sending presentation:', err);
+    }
+  };
+
   const attemptManualCredentialMatching = (proofRequest: any, storedCredentials: any[]) => {
     console.log('🔍 Starting manual credential matching...');
     console.log('Full proof request object:', proofRequest);
@@ -328,241 +745,6 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
 
   const formatState = (state: string) => {
     return state.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-  };
-
-  const handlePresentProof = async (presentationExchangeId: string) => {
-    try {
-      // Get available credentials for this proof request
-      console.log('Getting credentials for presentation request:', presentationExchangeId);
-      const credentialsResponse = await proofService.getCredentialsForPresentationRequest(walletId, presentationExchangeId);
-      console.log('Credentials response:', credentialsResponse);
-      console.log('Credentials response type:', typeof credentialsResponse);
-      console.log('Credentials response keys:', Object.keys(credentialsResponse || {}));
-      
-      if (!credentialsResponse || !credentialsResponse.results || credentialsResponse.results.length === 0) {
-        // Let's check what stored credentials we have and what the credentials API is returning
-        console.log('No matching credentials found. Let\'s debug this...');
-        try {
-          // Check both the proof credentials API response and our stored credentials
-          console.log('Credentials API Response:', credentialsResponse);
-          
-          // Also check what credentials we have stored in our wallet
-          const allCredentialExchanges = await credentialService.getCredentialExchanges(walletId);
-          console.log('All credential exchanges:', allCredentialExchanges);
-          
-          const storedCredentials = (allCredentialExchanges.results || []).filter((cred: any) => 
-            cred.state === 'stored' && cred.credential
-          );
-          console.log('Stored credentials that should be usable:', storedCredentials);
-          
-          // Also check the actual stored credentials endpoint
-          const actualStoredCredentials = await credentialService.getCredentials(walletId);
-          console.log('Actual stored credentials from credentials API:', actualStoredCredentials);
-          
-          const totalStoredCredentials = (actualStoredCredentials.results || actualStoredCredentials || []).length;
-          
-          // Show detailed comparison for debugging
-          console.log('=== DETAILED MISMATCH ANALYSIS ===');
-          const currentProofRequest = proofRequests.find(req => getExchangeId(req) === presentationExchangeId);
-          if (currentProofRequest?.presentation_request?.requested_attributes) {
-            const requestedAttrs = currentProofRequest.presentation_request.requested_attributes;
-            console.log('VERIFIER IS REQUESTING:');
-            Object.entries(requestedAttrs).forEach(([key, attr]: [string, any]) => {
-              console.log(`  - Attribute "${key}":`, {
-                name: attr.name,
-                names: attr.names,
-                restrictions: attr.restrictions
-              });
-            });
-          }
-          
-          console.log('YOUR STORED CREDENTIALS CONTAIN:');
-          (actualStoredCredentials.results || actualStoredCredentials || []).forEach((cred: any, index: number) => {
-            console.log(`  Credential ${index + 1}:`, {
-              schema_id: cred.schema_id,
-              cred_def_id: cred.cred_def_id,
-              attributes: Object.keys(cred.attrs || cred.attributes || {}),
-              attribute_values: cred.attrs || cred.attributes
-            });
-          });
-          
-          if (totalStoredCredentials === 0) {
-            setError('❌ You need to have stored credentials first! Go to the Credentials page and accept some credential offers, then return to respond to this proof request.');
-          } else {
-            setError(`❌ Schema/Attribute Mismatch: You have ${totalStoredCredentials} stored credentials, but none match what the verifier is requesting. Check the console for detailed comparison. This might be due to strict schema matching in ACA-Py.`);
-            
-            // Manual credential matching - check cred_def_id matches
-            console.log('🔧 ATTEMPTING MANUAL CREDENTIAL MATCHING...');
-            console.log('Current proof request structure:', currentProofRequest);
-            console.log('Looking for presentation_request in:', Object.keys(currentProofRequest || {}));
-            console.log('🔍 Checking pres_request field:', (currentProofRequest as any)?.pres_request);
-            
-            // Get the full presentation exchange record to get detailed request info
-            console.log('📋 Fetching full presentation exchange record...');
-            try {
-              const fullPresentationRecord = await proofService.getPresentationExchangeRecord(walletId, presentationExchangeId);
-              console.log('Full presentation exchange record:', fullPresentationRecord);
-              
-              const manualMatch = attemptManualCredentialMatching(
-                fullPresentationRecord, 
-                actualStoredCredentials.results || actualStoredCredentials || []
-              );
-            
-              if (manualMatch.canFulfill) {
-                console.log('✅ Manual matching found compatible credentials!');
-                console.log('Manually built presentation:', manualMatch.presentation);
-                
-                // Try to send the manually built presentation
-                try {
-                  console.log('🚀 SENDING PRESENTATION TO ACA-PY:', JSON.stringify(manualMatch.presentation, null, 2));
-                  const sendResult = await proofService.sendPresentation(walletId, presentationExchangeId, manualMatch.presentation);
-                  console.log('✅ Presentation sent successfully! Result:', sendResult);
-                  setError('✅ Proof presentation sent successfully using manual credential matching!');
-                  
-                  // Wait a bit for the state to update, then reload
-                  setTimeout(async () => {
-                    await loadProofRequests();
-                  }, 1500);
-                  return;
-                } catch (manualSendError: any) {
-                  console.error('❌ Manual presentation failed:', manualSendError);
-                  console.error('❌ Full error response:', manualSendError.response?.data);
-                  console.error('❌ Error status:', manualSendError.response?.status);
-                  console.error('❌ Error message from API:', JSON.stringify(manualSendError.response?.data, null, 2));
-                  
-                  // Try to extract more detailed error info
-                  if (manualSendError.response?.data) {
-                    const errorData = manualSendError.response.data;
-                    console.error('❌ Detailed API Error:', {
-                      message: errorData.message,
-                      statusCode: errorData.statusCode,
-                      error: errorData.error,
-                      details: errorData
-                    });
-                  }
-                  
-                  setError(`❌ Sending failed: ${JSON.stringify(manualSendError.response?.data?.message || manualSendError?.message || 'Unknown error')}`);
-                }
-              } else {
-                console.log('❌ Manual matching also failed - no compatible credential definition IDs found');
-                setError(`❌ No compatible credentials found. Manual check shows none of your ${totalStoredCredentials} credentials have matching credential definition IDs with what the verifier requires.`);
-              }
-            } catch (recordFetchError: any) {
-              console.error('Failed to fetch presentation exchange record:', recordFetchError);
-              
-              // Fallback to using the original proof request
-              const manualMatch = attemptManualCredentialMatching(
-                currentProofRequest, 
-                actualStoredCredentials.results || actualStoredCredentials || []
-              );
-              
-              if (manualMatch.canFulfill) {
-                console.log('✅ Fallback manual matching found compatible credentials!');
-                console.log('Manually built presentation:', manualMatch.presentation);
-                
-                try {
-                  const sendResult = await proofService.sendPresentation(walletId, presentationExchangeId, manualMatch.presentation);
-                  console.log('✅ Fallback presentation sent successfully! Result:', sendResult);
-                  setError('✅ Proof presentation sent successfully using fallback manual credential matching!');
-                  
-                  // Wait a bit for the state to update, then reload
-                  setTimeout(async () => {
-                    await loadProofRequests();
-                  }, 1500);
-                  return;
-                } catch (fallbackSendError: any) {
-                  console.error('Fallback manual presentation failed:', fallbackSendError);
-                  setError(`❌ Fallback matching found credentials but sending failed: ${fallbackSendError?.message || 'Unknown error'}`);
-                }
-              } else {
-                console.log('❌ Fallback manual matching also failed');
-                setError(`❌ No compatible credentials found even with fallback matching.`);
-              }
-            }
-          }
-        } catch (credError) {
-          console.error('Error checking stored credentials:', credError);
-          setError('❌ No matching credentials found for this proof request. Unable to check your stored credentials.');
-        }
-        return;
-      }
-
-      // For simplicity, auto-select the first available credential for each requested attribute
-      const proofRequest = proofRequests.find(req => getExchangeId(req) === presentationExchangeId);
-      console.log('Found proof request:', proofRequest);
-      if (!proofRequest) {
-        setError('Proof request not found');
-        return;
-      }
-
-      console.log('=== PROOF REQUEST ANALYSIS ===');
-      console.log('What this proof request is asking for:');
-      const requestedAttrs = proofRequest.presentation_request?.requested_attributes;
-      const requestedPreds = proofRequest.presentation_request?.requested_predicates;
-      console.log('Requested attributes:', requestedAttrs);
-      console.log('Requested predicates:', requestedPreds);
-      
-      // Show what attributes are specifically needed
-      if (requestedAttrs) {
-        Object.entries(requestedAttrs).forEach(([key, attr]: [string, any]) => {
-          console.log(`Required attribute "${key}":`, attr);
-        });
-      }
-
-      const requestedAttributes = proofRequest.presentation_request?.requested_attributes || {};
-      const requestedPredicates = proofRequest.presentation_request?.requested_predicates || {};
-
-      // Build the presentation
-      const presentation = {
-        presentation_exchange_id: presentationExchangeId,
-        requested_credentials: {
-          self_attested_attributes: {},
-          requested_attributes: {} as any,
-          requested_predicates: {} as any
-        }
-      };
-
-      // Map credentials to requested attributes
-      Object.keys(requestedAttributes).forEach(attrKey => {
-        const matchingCreds = credentialsResponse.results.filter(cred => {
-          const requestedAttr = requestedAttributes[attrKey];
-          const attrNames = requestedAttr.names || [requestedAttr.name];
-          return attrNames.some((name: string) => cred.attrs && name in cred.attrs);
-        });
-
-        if (matchingCreds.length > 0) {
-          const selectedCred = matchingCreds[0];
-          presentation.requested_credentials.requested_attributes[attrKey] = {
-            cred_id: selectedCred.credential_id,
-            revealed: true
-          };
-        }
-      });
-
-      // Handle predicates similarly
-      Object.keys(requestedPredicates).forEach(predKey => {
-        const matchingCreds = credentialsResponse.results.filter(cred => {
-          const requestedPred = requestedPredicates[predKey];
-          return cred.attrs && requestedPred.name in cred.attrs;
-        });
-
-        if (matchingCreds.length > 0) {
-          const selectedCred = matchingCreds[0];
-          presentation.requested_credentials.requested_predicates[predKey] = {
-            cred_id: selectedCred.credential_id
-          };
-        }
-      });
-
-      console.log('Sending presentation:', presentation);
-      await proofService.sendPresentation(walletId, presentationExchangeId, presentation);
-      setError('Proof presentation sent successfully!');
-      await loadProofRequests();
-    } catch (err: any) {
-      console.error('Error presenting proof:', err);
-      const errorMessage = err.response?.data?.message || err.message || 'Unknown error';
-      setError(`Failed to send proof presentation: ${errorMessage}`);
-    }
   };
 
   return (

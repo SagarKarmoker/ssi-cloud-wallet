@@ -36,6 +36,32 @@ export class CredentialService {
     }
   }
 
+  async listW3cCredentials(walletId: string) {
+    try {
+      const tokenResponse = await this.walletService.getAuthToken(walletId);
+      const token = tokenResponse.token;
+
+      // POST /credentials/w3c - Fetch W3C credentials from wallet
+      const response = await axiosInstance.post(
+        `${this.ACAPY_ADMIN_URL}/credentials/w3c`,
+        {}, // Empty body - no filters for now
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      this.logger.log(`Retrieved ${response.data.results?.length || 0} W3C/JSON-LD credentials for wallet ${walletId}`);
+      return response.data;
+    } catch (error: any) {
+      const msg = error.response?.data || error.message || 'Unknown error';
+      this.logger.error(`Failed to list W3C credentials: ${msg}`);
+      throw new HttpException(
+        `Failed to list W3C credentials: ${msg}`,
+        error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
   async getCredential(walletId: string, credentialId: string) {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);

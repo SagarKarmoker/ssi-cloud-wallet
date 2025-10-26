@@ -57,6 +57,11 @@ class CredentialService {
     return response.data;
   }
 
+  async getW3cCredentials(walletId: string): Promise<{ results: any[] }> {
+    const response = await api.get(`/credential/${walletId}/credentials/w3c`);
+    return response.data;
+  }
+
   async getCredential(walletId: string, credentialId: string): Promise<Credential> {
     const response = await api.get(`/credential/${walletId}/credentials/${credentialId}`);
     return response.data;

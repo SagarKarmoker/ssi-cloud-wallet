@@ -30,20 +30,18 @@ export interface CreateProofRequestData {
   trace: boolean;
 }
 
-export interface PresentationData {
-  presentation_exchange_id: string;
-  requested_credentials: {
-    self_attested_attributes: Record<string, string>;
-    requested_attributes: Record<string, any>;
-    requested_predicates: Record<string, any>;
-  };
-}
+// Allow flexible presentation specs for both Indy and DIF (JSON-LD)
+export type PresentationSpec = any;
 
 export interface CredentialForPresentation {
-  credential_id: string;
-  attrs: Record<string, string>;
-  schema_id: string;
-  cred_def_id: string;
+  credential_id?: string;
+  referent?: string;
+  record_id?: string; // JSON-LD wallet record id
+  attrs?: Record<string, string>;
+  schema_id?: string;
+  cred_def_id?: string;
+  type?: string[];
+  credential?: any;
 }
 
 class ProofService {
@@ -71,12 +69,13 @@ class ProofService {
     return response.data;
   }
 
-  async sendPresentation(walletId: string, presentationExchangeId: string, data: PresentationData): Promise<ProofRequest> {
+  // Accept both Indy and DIF JSON-LD presentation specs
+  async sendPresentation(walletId: string, presentationExchangeId: string, data: PresentationSpec): Promise<any> {
     const response = await api.post(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/send-presentation`, data);
     return response.data;
   }
 
-  async verifyPresentation(walletId: string, presentationExchangeId: string): Promise<ProofRequest> {
+  async verifyPresentation(walletId: string, presentationExchangeId: string): Promise<any> {
     const response = await api.post(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/verify-presentation`);
     return response.data;
   }
@@ -84,7 +83,7 @@ class ProofService {
   async getCredentialsForPresentationRequest(
     walletId: string, 
     presentationExchangeId: string
-  ): Promise<{ results: CredentialForPresentation[] }> {
+  ): Promise<any> {
     const response = await api.get(`/proof/${walletId}/presentation-exchange/${presentationExchangeId}/credentials`);
     return response.data;
   }
