@@ -11,6 +11,12 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'received' | 'sent' | 'all'>('received');
+  
+  // New states for credential selection modal
+  const [showCredentialSelector, setShowCredentialSelector] = useState(false);
+  const [selectedProofRequest, setSelectedProofRequest] = useState<any>(null);
+  const [availableCredentials, setAvailableCredentials] = useState<any[]>([]);
+  const [selectedCredentials, setSelectedCredentials] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (walletId) {
@@ -328,6 +334,314 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
     console.log('🧾 Built DIF presentation spec:', presentation);
 
     return { canFulfill, presentation, matchingDetails };
+  };
+
+  const openCredentialSelector = async (presentationExchangeId: string) => {
+    try {
+      setLoading(true);
+      
+      // Get the full presentation record
+      const fullPresentationRecord = await proofService.getPresentationExchangeRecord(walletId, presentationExchangeId);
+      console.log('📦 Full presentation exchange record:', fullPresentationRecord);
+      
+      // Check if it's DIF or Indy
+      const isDif = isDifPresentationRequest(fullPresentationRecord);
+      console.log(`🔍 Proof type detected: ${isDif ? 'DIF/JSON-LD' : 'Indy/AnonCreds'}`);
+      
+      let credentials: any[] = [];
+      let matches: any = {};
+      
+      if (isDif) {
+        // Load W3C credentials
+        const w3cCredentialsResponse = await credentialService.getW3cCredentials(walletId);
+        credentials = w3cCredentialsResponse.results || w3cCredentialsResponse || [];
+        
+        console.log(`📋 Loaded ${credentials.length} W3C credentials:`, credentials);
+        
+        // Get matching details
+        const matchResult = attemptManualJsonLdMatching(fullPresentationRecord, credentials);
+        matches = matchResult.matchingDetails || [];
+        
+        console.log('✅ DIF matching result:', {
+          canFulfill: matchResult.canFulfill,
+          matchesCount: Array.isArray(matches) ? matches.length : 0,
+          matches
+        });
+      } else {
+        // Load Indy credentials
+        const storedCredentials = await credentialService.getCredentials(walletId);
+        credentials = storedCredentials.results || storedCredentials || [];
+        
+        console.log(`📋 Loaded ${credentials.length} Indy credentials:`, credentials);
+        
+        // Get matching details
+        const matchResult = attemptManualCredentialMatching(fullPresentationRecord, credentials);
+        matches = matchResult.matchingDetails || [];
+        
+        console.log('✅ Indy matching result:', {
+          canFulfill: matchResult.canFulfill,
+          matchesCount: Array.isArray(matches) ? matches.length : 0,
+          matches
+        });
+      }
+      
+      // Set state for modal
+      setSelectedProofRequest(fullPresentationRecord);
+      setAvailableCredentials(credentials);
+      
+      // Initialize selected credentials with first match for each requirement
+      const initialSelection: Record<string, string> = {};
+      if (Array.isArray(matches)) {
+        matches.forEach((match: any) => {
+          if (match.credId && match.referent) {
+            initialSelection[match.referent] = match.credId;
+          } else if (match.recordId && match.inputDescriptorId) {
+            initialSelection[match.inputDescriptorId] = match.recordId;
+          }
+        });
+      }
+      setSelectedCredentials(initialSelection);
+      
+      console.log('🎯 Initial credential selection:', initialSelection);
+      
+      setShowCredentialSelector(true);
+      setLoading(false);
+    } catch (err) {
+      console.error('❌ Error loading credentials for selection:', err);
+      setError('Failed to load credentials for selection');
+      setLoading(false);
+    }
+  };
+
+  const sendPresentationWithSelectedCredentials = async () => {
+    if (!selectedProofRequest) return;
+    
+    try {
+      setLoading(true);
+      const presentationExchangeId = getExchangeId(selectedProofRequest);
+      const isDif = isDifPresentationRequest(selectedProofRequest);
+      
+      console.log('🚀 Building presentation to send...');
+      console.log('  - Proof type:', isDif ? 'DIF/JSON-LD' : 'Indy/AnonCreds');
+      console.log('  - Exchange ID:', presentationExchangeId);
+      console.log('  - Selected credentials:', selectedCredentials);
+      console.log('  - Full proof request:', selectedProofRequest);
+      
+      let presentationSpec: any;
+      
+      if (isDif) {
+        console.log('=== DIF PRESENTATION DEBUGGING ===');
+        console.log('Selected credentials (record_ids mapping):', selectedCredentials);
+        console.log('Number of selected credentials:', Object.keys(selectedCredentials).length);
+        
+        // Check if selectedCredentials is empty
+        if (Object.keys(selectedCredentials).length === 0) {
+          console.error('❌ ERROR: No credentials selected! Cannot build presentation.');
+          setError('❌ Please select at least one credential to send the presentation.');
+          setLoading(false);
+          return;
+        }
+        
+        // Log each selected credential mapping
+        Object.entries(selectedCredentials).forEach(([descriptorId, recordId]) => {
+          console.log(`  Input Descriptor "${descriptorId}" → Record ID: "${recordId}"`);
+        });
+        
+        // Get the actual W3C credentials to verify they exist
+        const w3cCredentialsResponse = await credentialService.getW3cCredentials(walletId);
+        const w3cCredentials = w3cCredentialsResponse.results || w3cCredentialsResponse || [];
+        
+        console.log(`=== FULL W3C CREDENTIALS STRUCTURE (${w3cCredentials.length} total) ===`);
+        w3cCredentials.forEach((c: any, index: number) => {
+          console.log(`\n📋 Credential #${index + 1}:`);
+          console.log('  ALL PROPERTIES:', Object.keys(c));
+          console.log('  record_id:', c.record_id);
+          console.log('  credential_id:', c.credential_id);
+          console.log('  cred_id:', c.cred_id);
+          console.log('  id:', c.id);
+          console.log('  type:', c.type);
+          console.log('  types:', c.types);
+          console.log('  expanded_types:', c.expanded_types);
+          console.log('  issuer:', c.issuer);
+          console.log('  issuer_id:', c.issuer_id);
+          console.log('  subject_ids:', c.subject_ids);
+          console.log('  credential:', c.credential ? 'EXISTS' : 'undefined');
+          console.log('  cred:', c.cred ? 'EXISTS' : 'undefined');
+          console.log('  Full object:', c);
+        });
+        
+        console.log('\n=== CREDENTIAL ID MAPPING ===');
+        console.log('Available W3C credentials in wallet:', w3cCredentials.map((c: any) => ({
+          record_id: c.record_id,
+          credential_id: c.credential_id,
+          cred_id: c.cred_id,
+          id: c.id,
+          type: c.type,
+          issuer: c.issuer
+        })));
+        
+        // Verify that selected record IDs exist in the wallet
+        Object.entries(selectedCredentials).forEach(([descriptorId, recordId]) => {
+          const credExists = w3cCredentials.find((c: any) => 
+            c.record_id === recordId || c.credential_id === recordId || c.cred_id === recordId || c.id === recordId
+          );
+          if (credExists) {
+            console.log(`✅ Credential for "${descriptorId}" exists in wallet: ${recordId}`);
+          } else {
+            console.error(`❌ Credential for "${descriptorId}" NOT FOUND in wallet: ${recordId}`);
+            console.error('Available record IDs:', w3cCredentials.map((c: any) => c.record_id || c.credential_id || c.id));
+          }
+        });
+        
+        // Build DIF presentation with selected credentials
+        presentationSpec = {
+          dif: {
+            record_ids: selectedCredentials
+          }
+        };
+        
+        console.log('📋 Built DIF presentation spec:', JSON.stringify(presentationSpec, null, 2));
+        console.warn('⚠️ KNOWN LIMITATION: ACA-Py may not properly include W3C credentials in DIF presentations.');
+        console.warn('⚠️ The presentation might be sent empty even though you selected credentials.');
+        console.warn('⚠️ This is a known issue with ACA-Py DIF/JSON-LD implementation.');
+        console.warn('⚠️ See: https://github.com/hyperledger/aries-cloudagent-python/issues');
+        console.warn('⚠️ TROUBLESHOOTING TIPS:');
+        console.warn('   1. Check if the record_ids above match the actual credential IDs in your wallet');
+        console.warn('   2. Verify ACA-Py version supports DIF Presentation Exchange v2');
+        console.warn('   3. Check ACA-Py logs for detailed error messages');
+        console.warn('   4. Consider using Indy/AnonCreds format instead if possible');
+      } else {
+        // Build Indy presentation with selected credentials
+        const presentationRequest = extractPresentationRequest(selectedProofRequest);
+        const requestedAttributes = presentationRequest?.requested_attributes || {};
+        const requestedPredicates = presentationRequest?.requested_predicates || {};
+        
+        presentationSpec = {
+          indy: {
+            requested_attributes: {},
+            requested_predicates: {},
+            self_attested_attributes: {}
+          }
+        };
+        
+        // Map selected credentials to requested attributes
+        Object.keys(requestedAttributes).forEach((attrReferent) => {
+          if (selectedCredentials[attrReferent]) {
+            presentationSpec.indy.requested_attributes[attrReferent] = {
+              cred_id: selectedCredentials[attrReferent],
+              revealed: true
+            };
+          }
+        });
+        
+        // Map selected credentials to requested predicates
+        Object.keys(requestedPredicates).forEach((predReferent) => {
+          if (selectedCredentials[predReferent]) {
+            presentationSpec.indy.requested_predicates[predReferent] = {
+              cred_id: selectedCredentials[predReferent]
+            };
+          }
+        });
+      }
+      
+      console.log('🚀 Sending presentation with selected credentials:', presentationSpec);
+      console.log('📤 API call: POST /proof/:walletId/presentation-exchange/:presExId/send-presentation');
+      
+      await proofService.sendPresentation(walletId, presentationExchangeId, presentationSpec);
+      
+      console.log('✅ Presentation sent successfully!');
+      
+      // Close modal immediately after successful send
+      setShowCredentialSelector(false);
+      setLoading(false);
+      
+      // Show success message
+      if (isDif) {
+        setError('⚠️ DIF presentation sent. Note: ACA-Py may send it empty due to known limitations. Check logs for "abandoned" status.');
+      } else {
+        setError('✅ Proof presentation sent successfully!');
+      }
+      
+      // Reload proof requests to update UI
+      setTimeout(async () => {
+        await loadProofRequests();
+      }, 1500);
+    } catch (err: any) {
+      console.error('❌ Error sending presentation:', err);
+      console.error('❌ Error response:', err.response?.data);
+      
+      let errorMessage = `Failed to send presentation: ${err.response?.data?.message || err.message}`;
+      
+      // Check for specific known errors and provide helpful messages
+      if (errorMessage.includes('Unknown DID')) {
+        const didMatch = errorMessage.match(/did:[a-z]+:[A-Za-z0-9]+/);
+        const did = didMatch ? didMatch[0] : 'unknown';
+        errorMessage = `❌ DID Resolution Error: Alice's ACA-Py cannot resolve ${did}.\n\n` +
+                      `🔧 FIX: Add this parameter to Alice's ACA-Py startup:\n` +
+                      `--endpoint-resolver universal https://dev.uniresolver.io/1.0/identifiers/\n\n` +
+                      `See FIXING_UNKNOWN_DID_ERROR.md for detailed instructions.`;
+      } else if (errorMessage.includes('record_ids')) {
+        errorMessage = `❌ Credential ID Error: ${errorMessage}\n\n` +
+                      `🔧 FIX: Check browser console for credential ID debugging information.`;
+      }
+      
+      setError(errorMessage);
+      setLoading(false);
+      // Keep modal open on error so user can see what went wrong and try again
+    }
+  };
+
+  const extractPresentationRequest = (proofRequest: any) => {
+    console.log('🔍 Extracting presentation request from:', proofRequest);
+    
+    // Try to get the base request object
+    let presentationRequest = proofRequest.presentation_request || 
+                             proofRequest.pres_request || 
+                             proofRequest.proof_request || 
+                             proofRequest.request || 
+                             proofRequest;
+    
+    // Check if we need to extract from by_format (preferred for DIF)
+    if (proofRequest.by_format?.pres_request?.dif) {
+      console.log('📋 Found DIF format in by_format');
+      return proofRequest.by_format.pres_request.dif;
+    }
+    
+    if (proofRequest.by_format?.pres_request?.indy) {
+      console.log('📋 Found Indy format in by_format');
+      return proofRequest.by_format.pres_request.indy;
+    }
+    
+    // Check for attachments in pres_request
+    if (proofRequest.pres_request && proofRequest.pres_request['request_presentations~attach']) {
+      const attachments = proofRequest.pres_request['request_presentations~attach'];
+      console.log('📎 Found request_presentations~attach:', attachments);
+      
+      if (Array.isArray(attachments) && attachments.length > 0) {
+        const attachment = attachments[0];
+        
+        // Try base64 first
+        if (attachment.data && attachment.data.base64) {
+          try {
+            const decodedData = atob(attachment.data.base64);
+            const parsed = JSON.parse(decodedData);
+            console.log('✅ Decoded base64 attachment:', parsed);
+            return parsed;
+          } catch (e) {
+            console.error('❌ Failed to decode base64 attachment:', e);
+          }
+        }
+        
+        // Try JSON format
+        if (attachment.data && attachment.data.json) {
+          console.log('✅ Found JSON attachment:', attachment.data.json);
+          return attachment.data.json;
+        }
+      }
+    }
+    
+    console.log('📄 Using presentation request as-is:', presentationRequest);
+    return presentationRequest;
   };
 
   const handlePresentProof = async (presentationExchangeId: string) => {
@@ -883,7 +1197,7 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
               {(activeTab === 'received' || activeTab === 'all') && (proofRequest.state === 'request_received' || proofRequest.state === 'request-received') && (
                 <Button
                   size="sm"
-                  onClick={() => handlePresentProof(getExchangeId(proofRequest))}
+                  onClick={() => openCredentialSelector(getExchangeId(proofRequest))}
                   className="bg-green-600 hover:bg-green-700 text-white"
                 >
                   📤 Send Proof
@@ -1040,6 +1354,611 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
           >
             ➕ Create Request
           </Button>
+        </div>
+      )}
+
+      {/* Credential Selector Modal */}
+      {showCredentialSelector && selectedProofRequest && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="sticky top-0 bg-white border-b border-gray-200 p-6 z-10">
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  🔐 Select Credentials for Proof
+                </h2>
+                <button
+                  onClick={() => setShowCredentialSelector(false)}
+                  className="text-gray-400 hover:text-gray-600 text-2xl"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-sm text-gray-600 mt-2">
+                Choose which credentials you want to use to fulfill this proof request
+              </p>
+            </div>
+
+            <div className="p-6">
+              {/* Show what's being requested */}
+              <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h3 className="font-semibold text-blue-900 mb-2">📋 Requested Information</h3>
+                {isDifPresentationRequest(selectedProofRequest) ? (
+                  <div className="space-y-2 text-sm">
+                    {(() => {
+                      const presentationRequest = extractPresentationRequest(selectedProofRequest);
+                      console.log('📄 Extracted presentation request for display:', presentationRequest);
+                      const presentationDefinition = presentationRequest?.presentation_definition;
+                      const inputDescriptors = presentationDefinition?.input_descriptors || [];
+                      
+                      console.log('📝 Input descriptors:', inputDescriptors);
+                      
+                      return inputDescriptors.map((descriptor: any, idx: number) => (
+                        <div key={idx} className="bg-white p-3 rounded border border-blue-100">
+                          <div className="font-medium text-blue-800">
+                            📌 {descriptor.name || descriptor.id || `Input ${idx + 1}`}
+                          </div>
+                          {descriptor.purpose && (
+                            <div className="text-gray-600 text-xs mt-1 italic">💬 {descriptor.purpose}</div>
+                          )}
+                          {descriptor.constraints?.fields && descriptor.constraints.fields.length > 0 && (
+                            <div className="mt-2 space-y-1">
+                              <div className="text-xs font-semibold text-gray-700">Required fields:</div>
+                              {descriptor.constraints.fields.map((f: any, fIdx: number) => {
+                                const paths = Array.isArray(f.path) ? f.path : [f.path];
+                                const fieldNames = paths.map((p: string) => {
+                                  // Extract field name from path like $.credentialSubject.familyName
+                                  const match = p.match(/\.(\w+)$/);
+                                  return match ? match[1] : p;
+                                }).join(', ');
+                                
+                                return (
+                                  <div key={fIdx} className="text-xs text-gray-700 ml-3">
+                                    • <span className="font-medium">{fieldNames}</span>
+                                    {f.purpose && <span className="text-gray-500 ml-1">- {f.purpose}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {descriptor.schema && descriptor.schema.length > 0 && (
+                            <div className="mt-2 text-xs text-gray-500">
+                              Schema: {descriptor.schema.map((s: any) => s.uri || s.id || s).join(', ')}
+                            </div>
+                          )}
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                ) : (
+                  <div className="space-y-2 text-sm">
+                    {(() => {
+                      const presentationRequest = extractPresentationRequest(selectedProofRequest);
+                      const requestedAttributes = presentationRequest?.requested_attributes || {};
+                      const requestedPredicates = presentationRequest?.requested_predicates || {};
+                      
+                      return (
+                        <>
+                          {Object.entries(requestedAttributes).map(([key, attr]: [string, any]) => (
+                            <div key={key} className="bg-white p-3 rounded border border-blue-100">
+                              <span className="font-medium text-blue-800">
+                                {attr.name || attr.names?.join(', ')}
+                              </span>
+                              {attr.restrictions && attr.restrictions.length > 0 && (
+                                <div className="text-xs text-gray-600 mt-1">
+                                  Schema: {attr.restrictions[0].schema_name || 'Any'}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                          {Object.entries(requestedPredicates).map(([key, pred]: [string, any]) => (
+                            <div key={key} className="bg-white p-3 rounded border border-blue-100">
+                              <span className="font-medium text-blue-800">
+                                {pred.name} {pred.p_type} {pred.p_value}
+                              </span>
+                            </div>
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+
+              {/* Credential selection */}
+              <div className="space-y-4">
+                <h3 className="font-semibold text-gray-900">✅ Available Credentials</h3>
+                <p className="text-sm text-gray-600">
+                  Select which credential(s) to use for this proof request. The system will attempt to match your credentials, but you can choose any credential you think is appropriate.
+                </p>
+                
+                {availableCredentials.length === 0 ? (
+                  <div className="text-center py-8 bg-gray-50 rounded-lg">
+                    <div className="text-4xl mb-2">📭</div>
+                    <p className="text-gray-600">No credentials found in your wallet</p>
+                    <p className="text-sm text-gray-500 mt-2">You need to receive and store credentials before you can respond to proof requests.</p>
+                  </div>
+                ) : isDifPresentationRequest(selectedProofRequest) ? (
+                  // DIF/JSON-LD Credential Selection
+                  (() => {
+                    const presentationRequest = extractPresentationRequest(selectedProofRequest);
+                    const presentationDefinition = presentationRequest?.presentation_definition;
+                    const inputDescriptors = presentationDefinition?.input_descriptors || [];
+                    
+                    return inputDescriptors.map((descriptor: any, idx: number) => {
+                      const descriptorId = descriptor.id || `input-${idx}`;
+                      
+                      // RELAXED MATCHING: Show all W3C credentials, let user choose
+                      // Only filter if there are very specific schema requirements
+                      const matchingCreds = availableCredentials.filter((cred: any) => {
+                        // If no schema specified, show all credentials
+                        const schemas = descriptor.schema || descriptor.schemas || [];
+                        if (schemas.length === 0) {
+                          return true; // Show all credentials if no schema restriction
+                        }
+                        
+                        // Try to match by type, but be lenient
+                        const credTypes = cred.credential?.type || [];
+                        const hasMatch = schemas.some((s: any) => {
+                          const schemaUri = s.uri || s.id || s;
+                          return credTypes.some((ct: string) => 
+                            ct.toLowerCase().includes(schemaUri.toLowerCase()) ||
+                            schemaUri.toLowerCase().includes(ct.toLowerCase())
+                          );
+                        });
+                        
+                        // If strict match fails, check if credential has any of the required fields
+                        if (!hasMatch && descriptor.constraints?.fields) {
+                          const credSubject = cred.credential?.credentialSubject || {};
+                          const credKeys = Object.keys(credSubject).map(k => k.toLowerCase());
+                          
+                          // Show credential if it has some of the required fields
+                          return descriptor.constraints.fields.some((field: any) => {
+                            const paths = Array.isArray(field.path) ? field.path : [field.path];
+                            return paths.some((path: string) => {
+                              const fieldName = path.match(/\.(\w+)$/)?.[1] || path;
+                              return credKeys.includes(fieldName.toLowerCase());
+                            });
+                          });
+                        }
+                        
+                        return hasMatch || true; // When in doubt, show it
+                      });
+                      
+                      return (
+                        <div key={descriptorId} className="border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-medium text-gray-900 mb-3">
+                            {descriptor.name || descriptor.id}
+                          </h4>
+                          
+                          {matchingCreds.length === 0 ? (
+                            // FALLBACK: Show all W3C credentials if no matches found
+                            <>
+                              <p className="text-sm text-yellow-600 mb-2 bg-yellow-50 p-2 rounded">
+                                ⚠️ No strict matches found. Showing all available credentials:
+                              </p>
+                              <div className="space-y-2">
+                                {availableCredentials.map((cred: any) => {
+                                  // Log the raw credential for debugging
+                                  console.log('🔍 Raw W3C credential data:', cred);
+                                  
+                                  const recordId = cred.record_id || cred.id;
+                                  const credential = cred.credential || cred.cred || cred;
+                                  const credSubject = credential?.credentialSubject || credential?.subject || {};
+                                  const credentialTypes = credential?.type || cred.type || [];
+                                  const issuer = credential?.issuer || cred.issuer || 'Unknown Issuer';
+                                  const issuanceDate = credential?.issuanceDate || cred.issuanceDate;
+                                  
+                                  console.log('📋 Extracted credential data:', {
+                                    recordId,
+                                    credentialTypes,
+                                    issuer,
+                                    issuanceDate,
+                                    credSubject,
+                                    hasSubject: Object.keys(credSubject).length > 0
+                                  });
+                                  
+                                  // Get a meaningful name for the credential
+                                  const credentialName = credentialTypes.filter((t: string) => t !== 'VerifiableCredential').join(', ') 
+                                    || credentialTypes.join(', ') 
+                                    || 'W3C Credential';
+                                  
+                                  return (
+                                    <label
+                                      key={recordId}
+                                      className={`block p-3 border rounded cursor-pointer transition-colors ${
+                                        selectedCredentials[descriptorId] === recordId
+                                          ? 'border-green-500 bg-green-50'
+                                          : 'border-gray-300 hover:border-green-300'
+                                      }`}
+                                    >
+                                      <input
+                                        type="radio"
+                                        name={descriptorId}
+                                        value={recordId}
+                                        checked={selectedCredentials[descriptorId] === recordId}
+                                        onChange={() => {
+                                          setSelectedCredentials(prev => ({
+                                            ...prev,
+                                            [descriptorId]: recordId
+                                          }));
+                                        }}
+                                        className="mr-3"
+                                      />
+                                      <div className="inline-block w-full">
+                                        <div className="flex justify-between items-start">
+                                          <div className="flex-1">
+                                            <div className="font-medium text-sm text-gray-900">
+                                              🎫 {credentialName}
+                                            </div>
+                                            <div className="text-xs text-gray-500 mt-1">
+                                              Issued by: {typeof issuer === 'string' ? issuer : issuer?.id || issuer?.name || 'Unknown'}
+                                            </div>
+                                            {issuanceDate && (
+                                              <div className="text-xs text-gray-400">
+                                                Date: {new Date(issuanceDate).toLocaleDateString()}
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                        
+                                        {/* Credential Subject Details */}
+                                        {Object.keys(credSubject).length > 0 ? (
+                                          <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                                            <div className="font-semibold text-gray-700 mb-1">📋 Attributes:</div>
+                                            <div className="grid grid-cols-2 gap-1">
+                                              {Object.entries(credSubject).map(([key, value]) => (
+                                                <div key={key} className="text-gray-600">
+                                                  <span className="font-medium">{key}:</span>{' '}
+                                                  <span className="text-gray-800">
+                                                    {typeof value === 'object' ? JSON.stringify(value).substring(0, 30) + '...' : String(value)}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="mt-2 p-2 bg-yellow-50 rounded text-xs border border-yellow-200">
+                                            <div className="text-yellow-700">⚠️ No credential subject data available</div>
+                                            <details className="mt-1">
+                                              <summary className="text-xs text-gray-600 cursor-pointer">Show raw data</summary>
+                                              <pre className="mt-1 text-xs text-gray-600 overflow-auto max-h-32">
+                                                {JSON.stringify(cred, null, 2)}
+                                              </pre>
+                                            </details>
+                                          </div>
+                                        )}
+                                        
+                                        <div className="text-xs text-gray-400 mt-2">
+                                          ID: {recordId?.slice(0, 30)}...
+                                        </div>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="space-y-2">
+                              {matchingCreds.map((cred: any) => {
+                                // Log the raw credential for debugging
+                                console.log('🔍 Matching W3C credential data:', cred);
+                                
+                                const recordId = cred.record_id || cred.id;
+                                const credential = cred.credential || cred.cred || cred;
+                                const credSubject = credential?.credentialSubject || credential?.subject || {};
+                                const credentialTypes = credential?.type || cred.type || [];
+                                const issuer = credential?.issuer || cred.issuer || 'Unknown Issuer';
+                                const issuanceDate = credential?.issuanceDate || cred.issuanceDate;
+                                
+                                // Get a meaningful name for the credential
+                                const credentialName = credentialTypes.filter((t: string) => t !== 'VerifiableCredential').join(', ') 
+                                  || credentialTypes.join(', ') 
+                                  || 'W3C Credential';
+                                
+                                return (
+                                  <label
+                                    key={recordId}
+                                    className={`block p-3 border rounded cursor-pointer transition-colors ${
+                                      selectedCredentials[descriptorId] === recordId
+                                        ? 'border-green-500 bg-green-50'
+                                        : 'border-gray-300 hover:border-green-300'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={descriptorId}
+                                      value={recordId}
+                                      checked={selectedCredentials[descriptorId] === recordId}
+                                      onChange={() => {
+                                        setSelectedCredentials(prev => ({
+                                          ...prev,
+                                          [descriptorId]: recordId
+                                        }));
+                                      }}
+                                      className="mr-3"
+                                    />
+                                    <div className="inline-block w-full">
+                                      <div className="flex justify-between items-start">
+                                        <div className="flex-1">
+                                          <div className="font-medium text-sm text-gray-900">
+                                            ✅ {credentialName}
+                                          </div>
+                                          <div className="text-xs text-gray-500 mt-1">
+                                            Issued by: {typeof issuer === 'string' ? issuer : issuer?.id || issuer?.name || 'Unknown'}
+                                          </div>
+                                          {issuanceDate && (
+                                            <div className="text-xs text-gray-400">
+                                              Date: {new Date(issuanceDate).toLocaleDateString()}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      
+                                      {/* Credential Subject Details */}
+                                      {Object.keys(credSubject).length > 0 ? (
+                                        <div className="mt-2 p-2 bg-blue-50 rounded text-xs border border-blue-100">
+                                          <div className="font-semibold text-blue-800 mb-1">📋 Attributes:</div>
+                                          <div className="grid grid-cols-2 gap-1">
+                                            {Object.entries(credSubject).map(([key, value]) => (
+                                              <div key={key} className="text-gray-600">
+                                                <span className="font-medium">{key}:</span>{' '}
+                                                <span className="text-gray-800">
+                                                  {typeof value === 'object' ? JSON.stringify(value).substring(0, 30) + '...' : String(value)}
+                                                </span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : (
+                                        <div className="mt-2 p-2 bg-yellow-50 rounded text-xs border border-yellow-200">
+                                          <div className="text-yellow-700">⚠️ No credential subject data available</div>
+                                          <details className="mt-1">
+                                            <summary className="text-xs text-gray-600 cursor-pointer">Show raw data</summary>
+                                            <pre className="mt-1 text-xs text-gray-600 overflow-auto max-h-32">
+                                              {JSON.stringify(cred, null, 2)}
+                                            </pre>
+                                          </details>
+                                        </div>
+                                      )}
+                                      
+                                      <div className="text-xs text-gray-400 mt-2">
+                                        ID: {recordId?.slice(0, 30)}...
+                                      </div>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()
+                ) : (
+                  // Indy/AnonCreds Credential Selection
+                  (() => {
+                    const presentationRequest = extractPresentationRequest(selectedProofRequest);
+                    const requestedAttributes = presentationRequest?.requested_attributes || {};
+                    const requestedPredicates = presentationRequest?.requested_predicates || {};
+                    const allRequirements: Record<string, any> = {
+                      ...Object.fromEntries(Object.entries(requestedAttributes).map(([k, v]) => [k, { ...(v as any), type: 'attribute' }])),
+                      ...Object.fromEntries(Object.entries(requestedPredicates).map(([k, v]) => [k, { ...(v as any), type: 'predicate' }]))
+                    };
+                    
+                    return Object.entries(allRequirements).map(([referent, requirement]: [string, any]) => {
+                      // RELAXED MATCHING: Show more credentials, let user decide
+                      const matchingCreds = availableCredentials.filter((cred: any) => {
+                        // If no attrs object, skip this credential
+                        if (!cred.attrs || typeof cred.attrs !== 'object') {
+                          return false;
+                        }
+                        
+                        const credDefId = cred.cred_def_id;
+                        const requestedCredDefId = requirement.restrictions?.[0]?.cred_def_id;
+                        const credKeys = Object.keys(cred.attrs).map(k => k.toLowerCase());
+                        
+                        // If specific cred_def_id is required, check it first
+                        // But don't exclude if restriction is missing
+                        if (requestedCredDefId && credDefId !== requestedCredDefId) {
+                          // Still check if credential has the required attributes as a fallback
+                          const requiredNames = requirement.names || [requirement.name];
+                          if (requiredNames && Array.isArray(requiredNames)) {
+                            const hasAnyRequiredAttr = requiredNames.some((name: string) => 
+                              credKeys.includes(name.toLowerCase())
+                            );
+                            if (!hasAnyRequiredAttr) {
+                              return false; // Strict fail - different cred_def AND missing attributes
+                            }
+                            // Has required attributes, so show it even with different cred_def
+                          } else {
+                            return false; // Different cred_def_id and can't verify attributes
+                          }
+                        }
+                        
+                        // Check if credential has at least SOME of the required attributes
+                        const requiredNames = requirement.names || [requirement.name];
+                        if (requiredNames && Array.isArray(requiredNames)) {
+                          // RELAXED: Show if it has at least one required attribute
+                          return requiredNames.some((name: string) => 
+                            credKeys.includes(name.toLowerCase())
+                          );
+                        } else if (requiredNames) {
+                          // Single attribute requirement
+                          return credKeys.includes(requiredNames.toLowerCase());
+                        }
+                        
+                        // If no specific requirements, show all credentials
+                        return true;
+                      });
+                      
+                      return (
+                        <div key={referent} className="border border-gray-200 rounded-lg p-4">
+                          <h4 className="font-medium text-gray-900 mb-3">
+                            {requirement.type === 'attribute' 
+                              ? `📝 ${requirement.name || requirement.names?.join(', ')}`
+                              : `🔢 ${requirement.name} ${requirement.p_type} ${requirement.p_value}`
+                            }
+                          </h4>
+                          
+                          {matchingCreds.length === 0 ? (
+                            // FALLBACK: Show all Indy credentials if no matches found
+                            <>
+                              <p className="text-sm text-yellow-600 mb-2 bg-yellow-50 p-2 rounded">
+                                ⚠️ No strict matches found. Showing all available credentials - choose the closest match:
+                              </p>
+                              <div className="space-y-2">
+                                {availableCredentials.filter((c: any) => c.attrs).map((cred: any) => {
+                                  const credId = cred.referent || cred.credential_id || cred.cred_id;
+                                  const schemaName = cred.schema_id?.split(':')[2] || 'Credential';
+                                  const credDefId = cred.cred_def_id;
+                                  
+                                  return (
+                                    <label
+                                      key={credId}
+                                      className={`block p-3 border rounded cursor-pointer transition-colors ${
+                                        selectedCredentials[referent] === credId
+                                          ? 'border-green-500 bg-green-50'
+                                          : 'border-gray-300 hover:border-green-300'
+                                      }`}
+                                    >
+                                      <input
+                                        type="radio"
+                                        name={referent}
+                                        value={credId}
+                                        checked={selectedCredentials[referent] === credId}
+                                        onChange={() => {
+                                          setSelectedCredentials(prev => ({
+                                            ...prev,
+                                            [referent]: credId
+                                          }));
+                                        }}
+                                        className="mr-3"
+                                      />
+                                      <div className="inline-block w-full">
+                                        <div className="font-medium text-sm text-gray-900">
+                                          🎫 {schemaName}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1">
+                                          Schema: {cred.schema_id}
+                                        </div>
+                                        
+                                        {/* Attributes Display */}
+                                        {cred.attrs && Object.keys(cred.attrs).length > 0 && (
+                                          <div className="mt-2 p-2 bg-gray-50 rounded text-xs">
+                                            <div className="font-semibold text-gray-700 mb-1">📋 Attributes:</div>
+                                            <div className="grid grid-cols-2 gap-1">
+                                              {Object.entries(cred.attrs).map(([key, value]) => (
+                                                <div key={key} className="text-gray-600">
+                                                  <span className="font-medium">{key}:</span>{' '}
+                                                  <span className="text-gray-800">{String(value)}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        <div className="text-xs text-gray-400 mt-2">
+                                          Cred ID: {credId?.slice(0, 30)}...
+                                        </div>
+                                        <div className="text-xs text-gray-400">
+                                          Cred Def: {credDefId?.split(':').slice(-2).join(':') || credDefId}
+                                        </div>
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="space-y-2">
+                              {matchingCreds.map((cred: any) => {
+                                const credId = cred.referent || cred.credential_id || cred.cred_id;
+                                const schemaName = cred.schema_id?.split(':')[2] || 'Credential';
+                                const credDefId = cred.cred_def_id;
+                                
+                                return (
+                                  <label
+                                    key={credId}
+                                    className={`block p-3 border rounded cursor-pointer transition-colors ${
+                                      selectedCredentials[referent] === credId
+                                        ? 'border-green-500 bg-green-50'
+                                        : 'border-gray-300 hover:border-green-300'
+                                    }`}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={referent}
+                                      value={credId}
+                                      checked={selectedCredentials[referent] === credId}
+                                      onChange={() => {
+                                        setSelectedCredentials(prev => ({
+                                          ...prev,
+                                          [referent]: credId
+                                        }));
+                                      }}
+                                      className="mr-3"
+                                    />
+                                    <div className="inline-block w-full">
+                                      <div className="font-medium text-sm text-gray-900">
+                                        ✅ {schemaName}
+                                      </div>
+                                      <div className="text-xs text-gray-500 mt-1">
+                                        Schema: {cred.schema_id}
+                                      </div>
+                                      
+                                      {/* Attributes Display */}
+                                      {cred.attrs && Object.keys(cred.attrs).length > 0 && (
+                                        <div className="mt-2 p-2 bg-blue-50 rounded text-xs border border-blue-100">
+                                          <div className="font-semibold text-blue-800 mb-1">📋 Attributes:</div>
+                                          <div className="grid grid-cols-2 gap-1">
+                                            {Object.entries(cred.attrs).map(([key, value]) => (
+                                              <div key={key} className="text-gray-600">
+                                                <span className="font-medium">{key}:</span>{' '}
+                                                <span className="text-gray-800">{String(value)}</span>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      
+                                      <div className="text-xs text-gray-400 mt-2">
+                                        Cred ID: {credId?.slice(0, 30)}...
+                                      </div>
+                                      <div className="text-xs text-gray-400">
+                                        Cred Def: {credDefId?.split(':').slice(-2).join(':') || credDefId}
+                                      </div>
+                                    </div>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+            </div>
+
+            {/* Footer with actions */}
+            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-6 flex justify-end space-x-3">
+              <Button
+                onClick={() => setShowCredentialSelector(false)}
+                variant="outline"
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={sendPresentationWithSelectedCredentials}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                disabled={loading || Object.keys(selectedCredentials).length === 0}
+              >
+                {loading ? 'Sending...' : '📤 Send Proof Presentation'}
+              </Button>
+            </div>
+          </div>
         </div>
       )}
     </div>

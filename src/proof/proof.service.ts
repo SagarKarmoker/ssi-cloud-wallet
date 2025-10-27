@@ -71,7 +71,26 @@ export class ProofService {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
 
-      this.logger.log(`Sending presentation for exchange ${presExId}. Payload: ${JSON.stringify(presentationSpec)}`);
+      this.logger.log(`=== SENDING PRESENTATION ===`);
+      this.logger.log(`Wallet ID: ${walletId}`);
+      this.logger.log(`Presentation Exchange ID: ${presExId}`);
+      this.logger.log(`Presentation Spec: ${JSON.stringify(presentationSpec, null, 2)}`);
+      
+      // Check if it's DIF or Indy
+      const isDif = presentationSpec.dif !== undefined;
+      const isIndy = presentationSpec.indy !== undefined;
+      
+      if (isDif) {
+        this.logger.warn('⚠️ DIF presentation detected!');
+        this.logger.warn('⚠️ record_ids: ' + JSON.stringify(presentationSpec.dif.record_ids));
+        this.logger.warn('⚠️ NOTE: ACA-Py may abandon DIF presentations if record IDs are incorrect');
+      }
+      
+      if (isIndy) {
+        this.logger.log('✅ Indy presentation detected');
+        this.logger.log('Requested attributes: ' + JSON.stringify(presentationSpec.indy.requested_attributes));
+        this.logger.log('Requested predicates: ' + JSON.stringify(presentationSpec.indy.requested_predicates));
+      }
 
       const response = await axiosInstance.post(
         `${this.ACAPY_ADMIN_URL}/present-proof-2.0/records/${presExId}/send-presentation`,
@@ -81,13 +100,32 @@ export class ProofService {
         },
       );
 
-      this.logger.log(`Sent presentation for exchange record ${presExId} from wallet ${walletId}`);
-      return response.data;
+      this.logger.log(`✅ Presentation sent successfully!`);
+      this.logger.log(`Response: ${JSON.stringify(response.data)}`);
+      return;
     } catch (error: any) {
       const errorDetails = error.response?.data || error.message || 'Unknown error';
       const errorMessage = typeof errorDetails === 'object' ? JSON.stringify(errorDetails) : errorDetails;
-      this.logger.error(`Failed to send presentation: ${errorMessage}`);
+      
+      this.logger.error(`❌ Failed to send presentation!`);
+      this.logger.error(`Error message: ${errorMessage}`);
       this.logger.error(`Full error response: ${JSON.stringify(error.response?.data)}`);
+      this.logger.error(`HTTP Status: ${error.response?.status}`);
+      
+      // Check if it's a DIF-related error
+      if (presentationSpec.dif) {
+        this.logger.error('⚠️ This is a DIF presentation. Common issues:');
+        this.logger.error('  1. record_ids may not match actual W3C credential IDs in ACA-Py wallet');
+        this.logger.error('  2. ACA-Py version may not fully support DIF Presentation Exchange v2');
+        this.logger.error('  3. W3C credentials may not be properly stored in the wallet');
+        this.logger.error('  4. The verifier may not support DIF format');
+        this.logger.error('🔧 TROUBLESHOOTING STEPS:');
+        this.logger.error('  - Check ACA-Py logs for detailed error messages');
+        this.logger.error('  - Verify W3C credentials exist: GET /credentials/w3c');
+        this.logger.error('  - Try using Indy/AnonCreds format instead if possible');
+        this.logger.error('  - Ensure ACA-Py version >= 0.10.0 for better DIF support');
+      }
+      
       throw new HttpException(
         `Failed to send presentation: ${errorMessage}`,
         error.response?.status || HttpStatus.INTERNAL_SERVER_ERROR,
@@ -99,6 +137,8 @@ export class ProofService {
     try {
       const tokenResponse = await this.walletService.getAuthToken(walletId);
       const token = tokenResponse.token;
+
+      this.logger.log(`Sending presentation request to connection ${connectionId} from wallet ${walletId}. Payload: ${JSON.stringify(presentationRequest)}`);
 
       const payload = {
         connection_id: connectionId,

@@ -24,6 +24,8 @@ export class CredentialService {
         headers: { Authorization: `Bearer ${token}` },
       });
 
+      // console.log(response.data);
+
       this.logger.log(`Retrieved ${response.data.results?.length || 0} credentials for wallet ${walletId}`);
       return response.data;
     } catch (error: any) {
@@ -50,7 +52,18 @@ export class CredentialService {
         },
       );
 
+      this.logger.log("=== W3C CREDENTIALS DEBUG ===");
       this.logger.log(`Retrieved ${response.data.results?.length || 0} W3C/JSON-LD credentials for wallet ${walletId}`);
+      
+      // Log credential IDs for debugging DIF presentations
+      if (response.data.results && response.data.results.length > 0) {
+        this.logger.log("Available W3C credential IDs (use these for DIF record_ids):");
+        response.data.results.forEach((cred: any, index: number) => {
+          this.logger.log(`  [${index}] record_id: ${cred.record_id || 'N/A'}, credential_id: ${cred.credential_id || 'N/A'}, id: ${cred.id || 'N/A'}`);
+          this.logger.log(`      type: ${cred.type || 'N/A'}, issuer: ${cred.issuer || 'N/A'}`);
+        });
+      }
+
       return response.data;
     } catch (error: any) {
       const msg = error.response?.data || error.message || 'Unknown error';
