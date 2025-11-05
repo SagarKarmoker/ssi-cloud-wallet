@@ -17,9 +17,30 @@ type AuthAction =
   | { type: 'LOGOUT' }
   | { type: 'CLEAR_ERROR' };
 
+// Helper functions for localStorage
+const getUserFromStorage = (): User | null => {
+  const userStr = localStorage.getItem('user');
+  if (userStr) {
+    try {
+      return JSON.parse(userStr);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+const saveUserToStorage = (user: User) => {
+  localStorage.setItem('user', JSON.stringify(user));
+};
+
+const removeUserFromStorage = () => {
+  localStorage.removeItem('user');
+};
+
 const initialState: AuthState = {
-  user: null,
-  isAuthenticated: false,
+  user: getUserFromStorage(), // Load user from localStorage if available
+  isAuthenticated: !!getUserFromStorage(), // Set authenticated if user exists in storage
   isLoading: false, // Start with false, set to true only when making API calls
   error: null,
 };
@@ -29,6 +50,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
     case 'AUTH_START':
       return { ...state, isLoading: true, error: null };
     case 'AUTH_SUCCESS':
+      saveUserToStorage(action.user); // Save user to localStorage
       return {
         ...state,
         user: action.user,
@@ -37,6 +59,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         error: null,
       };
     case 'AUTH_ERROR':
+      removeUserFromStorage(); // Remove user from localStorage on error
       return {
         ...state,
         user: null,
@@ -45,6 +68,7 @@ function authReducer(state: AuthState, action: AuthAction): AuthState {
         error: action.error,
       };
     case 'LOGOUT':
+      removeUserFromStorage(); // Remove user from localStorage on logout
       return {
         ...state,
         user: null,
@@ -95,13 +119,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     // Check if user is already logged in on app start
     const token = authService.getToken();
-    if (token) {
-      // Try to validate the token by calling loadUser
+    const storedUser = getUserFromStorage();
+    
+    if (token && storedUser) {
+      // We have both token and user in storage - user is authenticated
+      // Optionally, we could refresh user data in background, but for now just use stored data
+      // This prevents logout on page reload if backend is temporarily unavailable
+      if (!state.isAuthenticated) {
+        dispatch({ type: 'AUTH_SUCCESS', user: storedUser });
+      }
+    } else if (token && !storedUser) {
+      // We have token but no user data - try to fetch it
       loadUser();
-    } else {
-      dispatch({ type: 'AUTH_ERROR', error: 'Not authenticated' });
     }
-  }, []); // Empty dependency array - only run once on mount
+    // If no token, just keep the initial state (not authenticated, not loading)
+  }, []); // Run only once on mount
 
   const login = async (data: LoginData) => {
     try {
