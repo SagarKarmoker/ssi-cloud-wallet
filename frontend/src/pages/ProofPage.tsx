@@ -207,6 +207,7 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
     
     console.log(`✅ Normalized ${normalizedCreds.length} W3C credentials`);
 
+    // IMPROVED: For each input descriptor, find ONE credential that satisfies ALL field constraints
     presentationDefinition.input_descriptors.forEach((descriptor: any, index: number) => {
       const id = descriptor.id || `input-${index + 1}`;
       const fields = descriptor.constraints?.fields || [];
@@ -218,8 +219,29 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
       console.log(`\n🔍 Looking for match for input descriptor "${id}":`, {
         schemaUris,
         fieldsCount: fields.length,
-        fields
+        fields: fields.map((f: any) => f.path)
       });
+
+      // Extract all required field names from paths
+      const requiredFieldNames: string[] = [];
+      fields.forEach((field: any) => {
+        const pathArr = Array.isArray(field.path) ? field.path : [field.path];
+        pathArr.forEach((path: string) => {
+          const patterns = [
+            /\$\.credentialSubject\.(\w+)/,
+            /credentialSubject\.(\w+)/,
+            /^(\w+)$/
+          ];
+          for (const pattern of patterns) {
+            const match = path.match(pattern);
+            if (match && match[1] && !requiredFieldNames.includes(match[1])) {
+              requiredFieldNames.push(match[1]);
+            }
+          }
+        });
+      });
+
+      console.log(`📝 Required field names for "${id}": ${requiredFieldNames.join(', ') || 'none'}`);
 
       const matches = normalizedCreds.find((cred) => {
         console.log(`  🔍 Trying to match credential:`, {
@@ -237,11 +259,25 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
           );
           if (schemaMatch) {
             console.log(`  ✅ Type match found for ${id}: ${cred.type.join(', ')}`);
+            
+            // Still need to check if credential has all required fields
+            if (requiredFieldNames.length > 0) {
+              const subjectKeys = new Set(Object.keys(cred.subject));
+              const hasAllFields = requiredFieldNames.every(fieldName => subjectKeys.has(fieldName));
+              if (hasAllFields) {
+                console.log(`  ✅ Credential has all required fields: ${requiredFieldNames.join(', ')}`);
+                return true;
+              } else {
+                const missingFields = requiredFieldNames.filter(f => !subjectKeys.has(f));
+                console.log(`  ❌ Credential missing fields: ${missingFields.join(', ')}`);
+                return false;
+              }
+            }
             return true;
           }
         }
         
-        // Then check constraints.fields paths roughly (credentialSubject keys)
+        // Then check constraints.fields paths - credential must have ALL required fields
         if (fields.length > 0) {
           if (!cred.subject || typeof cred.subject !== 'object' || Object.keys(cred.subject).length === 0) {
             console.log(`  ⚠️ Credential has no valid subject, skipping field checks`);
@@ -913,50 +949,93 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
     let canFulfill = true;
     const matchingDetails: any[] = [];
 
-    // Check requested attributes
-    for (const [attrReferent, attrInfo] of Object.entries(requestedAttributes)) {
-      console.log(`\n🔍 Checking attribute: ${attrReferent}`, attrInfo);
-      console.log(`   Attribute restrictions:`, (attrInfo as any).restrictions);
-      console.log(`   Required names:`, (attrInfo as any).names || (attrInfo as any).name);
-      
-      const matchingCredential = storedCredentials.find((cred: any, credIndex: number) => {
-        const credDefId = cred.cred_def_id;
-        const requestedCredDefId = (attrInfo as any).restrictions?.[0]?.cred_def_id;
-        
-        console.log(`  🔄 Checking credential ${credIndex + 1}:`);
-        console.log(`    - Stored cred_def_id: ${credDefId}`);
-        console.log(`    - Requested cred_def_id: ${requestedCredDefId}`);
-        console.log(`    - Credential attributes: ${cred.attrs ? Object.keys(cred.attrs).join(', ') : 'None'}`);
-        
-        if (requestedCredDefId && credDefId === requestedCredDefId) {
-          console.log(`    ✅ CRED_DEF_ID MATCH! ${credDefId}`);
-          return true;
-        }
-        
-        // Also check if the credential has the required attributes
-        const requiredNames = (attrInfo as any).names || [(attrInfo as any).name];
-        if (requiredNames && Array.isArray(requiredNames)) {
-          const hasRequiredAttrs = requiredNames.every((name: string) => 
-            cred.attrs && Object.keys(cred.attrs).includes(name)
-          );
-          
-          console.log(`    - Required attribute names: ${requiredNames.join(', ')}`);
-          console.log(`    - Has required attributes: ${hasRequiredAttrs}`);
-          
-          if (hasRequiredAttrs && !requestedCredDefId) {
-            console.log(`    ✅ ATTRIBUTE MATCH (no cred_def_id restriction)!`);
-            return true;
-          }
-        }
-        
-        console.log(`    ❌ No match for this credential`);
-        return false;
-      });
+    // IMPROVED: Collect all required attributes first
+    console.log('\n📋 COLLECTING ALL REQUIRED ATTRIBUTES...');
+    const allRequiredAttributes: string[] = [];
+    const attributeReferents: string[] = [];
+    let commonCredDefId: string | null = null;
 
-      if (matchingCredential) {
-        const credentialId = matchingCredential.referent || matchingCredential.credential_id || matchingCredential.cred_id;
-        console.log(`📌 Using credential ID: ${credentialId} (from referent: ${matchingCredential.referent}, credential_id: ${matchingCredential.credential_id})`);
-        
+    // Collect all required attribute names and check for common cred_def_id restriction
+    for (const [attrReferent, attrInfo] of Object.entries(requestedAttributes)) {
+      attributeReferents.push(attrReferent);
+      
+      const requiredNames = (attrInfo as any).names || [(attrInfo as any).name];
+      if (requiredNames && Array.isArray(requiredNames)) {
+        allRequiredAttributes.push(...requiredNames.filter((n: string) => n));
+      }
+      
+      // Check if there's a cred_def_id restriction
+      const requestedCredDefId = (attrInfo as any).restrictions?.[0]?.cred_def_id;
+      if (requestedCredDefId) {
+        if (commonCredDefId && commonCredDefId !== requestedCredDefId) {
+          console.warn(`⚠️ Multiple different cred_def_id restrictions found! This might require multiple credentials.`);
+        } else {
+          commonCredDefId = requestedCredDefId;
+        }
+      }
+    }
+
+    console.log(`📝 Total required attributes: ${allRequiredAttributes.join(', ')}`);
+    console.log(`📝 Common cred_def_id restriction: ${commonCredDefId || 'None'}`);
+    console.log(`📝 Attribute referents: ${attributeReferents.join(', ')}`);
+    console.log(`📝 Number of attributes requested: ${allRequiredAttributes.length}`);
+
+    // IMPORTANT: When all attributes have the SAME cred_def_id, we MUST use a single credential
+    const mustUseSingleCredential = commonCredDefId !== null && allRequiredAttributes.length > 1;
+    
+    if (mustUseSingleCredential) {
+      console.log(`\n⚠️ IMPORTANT: All ${allRequiredAttributes.length} attributes require the SAME cred_def_id (${commonCredDefId})`);
+      console.log(`⚠️ MUST find ONE credential containing ALL attributes!`);
+    }
+
+    // IMPROVED: Find ONE credential that has ALL required attributes
+    console.log('\n🔍 SEARCHING FOR ONE CREDENTIAL WITH ALL REQUIRED ATTRIBUTES...');
+    
+    const bestMatchingCredential = storedCredentials.find((cred: any, credIndex: number) => {
+      console.log(`\n  🔄 Checking credential ${credIndex + 1}:`);
+      console.log(`    - Credential ID: ${cred.referent || cred.cred_id}`);
+      console.log(`    - Cred Def ID: ${cred.cred_def_id}`);
+      console.log(`    - Available attributes: ${cred.attrs ? Object.keys(cred.attrs).join(', ') : 'None'}`);
+      
+      // Check cred_def_id if required
+      if (commonCredDefId) {
+        if (cred.cred_def_id !== commonCredDefId) {
+          console.log(`    ❌ Cred def ID mismatch: expected ${commonCredDefId}, got ${cred.cred_def_id}`);
+          return false;
+        }
+        console.log(`    ✅ Cred def ID matches: ${commonCredDefId}`);
+      }
+      
+      // Check if this credential has ALL required attributes
+      if (!cred.attrs || typeof cred.attrs !== 'object') {
+        console.log(`    ❌ No attributes found in credential`);
+        return false;
+      }
+      
+      const credentialAttributeKeys = Object.keys(cred.attrs);
+      const missingAttributes = allRequiredAttributes.filter(reqAttr => 
+        !credentialAttributeKeys.includes(reqAttr)
+      );
+      
+      if (missingAttributes.length > 0) {
+        console.log(`    ❌ Missing required attributes: ${missingAttributes.join(', ')}`);
+        return false;
+      }
+      
+      console.log(`    ✅ HAS ALL REQUIRED ATTRIBUTES! This credential can fulfill the entire proof request.`);
+      return true;
+    });
+
+    // Use the best matching credential for ALL requested attributes
+    if (bestMatchingCredential) {
+      const credentialId = bestMatchingCredential.referent || bestMatchingCredential.credential_id || bestMatchingCredential.cred_id;
+      console.log(`\n🎯 USING SINGLE CREDENTIAL FOR ALL ATTRIBUTES:`);
+      console.log(`   Credential ID: ${credentialId}`);
+      console.log(`   Cred Def ID: ${bestMatchingCredential.cred_def_id}`);
+      console.log(`   Attributes: ${Object.keys(bestMatchingCredential.attrs).join(', ')}`);
+      
+      // Map this single credential to ALL requested attribute referents
+      for (const attrReferent of attributeReferents) {
         presentation.indy.requested_attributes[attrReferent] = {
           cred_id: credentialId,
           revealed: true
@@ -964,41 +1043,118 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
         matchingDetails.push({
           type: 'attribute',
           referent: attrReferent,
-          credential: matchingCredential.cred_def_id,
-          credId: matchingCredential.referent
+          credential: bestMatchingCredential.cred_def_id,
+          credId: credentialId
         });
-        console.log(`✅ Matched attribute ${attrReferent} with credential ${matchingCredential.cred_def_id}`);
-      } else {
-        console.log(`❌ Could not match attribute ${attrReferent}`);
+        console.log(`   ✅ Mapped attribute "${attrReferent}" to credential ${credentialId}`);
+      }
+    } else {
+      console.log(`\n❌ NO SINGLE CREDENTIAL FOUND WITH ALL REQUIRED ATTRIBUTES!`);
+      console.log(`   Required attributes: ${allRequiredAttributes.join(', ')}`);
+      console.log(`   Required cred_def_id: ${commonCredDefId || 'any'}`);
+      
+      // IMPORTANT: If all attributes require the same cred_def_id, we CANNOT use individual matching
+      if (mustUseSingleCredential) {
+        console.error(`\n🚫 CANNOT FULFILL PROOF REQUEST!`);
+        console.error(`   Reason: All ${allRequiredAttributes.length} attributes require the same cred_def_id: ${commonCredDefId}`);
+        console.error(`   Required: ONE credential with ALL attributes: ${allRequiredAttributes.join(', ')}`);
+        console.error(`   Available credentials don't have all required attributes together.`);
+        console.error(`\n💡 SOLUTION: Issue a credential with all these attributes:`);
+        console.error(`   - Cred Def ID: ${commonCredDefId}`);
+        console.error(`   - Attributes: ${allRequiredAttributes.join(', ')}`);
+        
         canFulfill = false;
+        
+        // Don't attempt fallback - it would be incorrect to use multiple credentials
+      } else {
+        // Fallback: Try to match attributes individually (only when they can come from different credentials)
+        console.log(`\n⚠️ FALLBACK: Attempting to match attributes individually...`);
+        console.log(`   (Allowed because attributes have different or no cred_def_id restrictions)`);
+        
+        for (const [attrReferent, attrInfo] of Object.entries(requestedAttributes)) {
+          console.log(`\n🔍 Checking attribute: ${attrReferent}`, attrInfo);
+
+          const matchingCredential = storedCredentials.find((cred: any) => {
+            const credDefId = cred.cred_def_id;
+            const requestedCredDefId = (attrInfo as any).restrictions?.[0]?.cred_def_id;
+
+            if (requestedCredDefId && credDefId === requestedCredDefId) {
+              return true;
+            }
+
+            const requiredNames = (attrInfo as any).names || [(attrInfo as any).name];
+            if (requiredNames && Array.isArray(requiredNames)) {
+              const hasRequiredAttrs = requiredNames.every((name: string) =>
+                cred.attrs && Object.keys(cred.attrs).includes(name)
+              );
+
+              if (hasRequiredAttrs && !requestedCredDefId) {
+                return true;
+              }
+            }
+
+            return false;
+          });
+
+          if (matchingCredential) {
+            const credentialId = matchingCredential.referent || matchingCredential.credential_id || matchingCredential.cred_id;
+
+            presentation.indy.requested_attributes[attrReferent] = {
+              cred_id: credentialId,
+              revealed: true
+            };
+            matchingDetails.push({
+              type: 'attribute',
+              referent: attrReferent,
+              credential: matchingCredential.cred_def_id,
+              credId: matchingCredential.referent
+            });
+            console.log(`✅ Matched attribute ${attrReferent} with credential ${matchingCredential.cred_def_id}`);
+          } else {
+            console.log(`❌ Could not match attribute ${attrReferent}`);
+            canFulfill = false;
+          }
+        }
       }
     }
 
-    // Check requested predicates  
+    // Check requested predicates - use the same credential if possible
+    console.log('\n🔍 CHECKING PREDICATES...');
+    console.log('\n🔍 CHECKING PREDICATES...');
     for (const [predReferent, predInfo] of Object.entries(requestedPredicates)) {
       console.log(`\n🔍 Checking predicate: ${predReferent}`, predInfo);
       
-      const matchingCredential = storedCredentials.find((cred: any) => {
-        const credDefId = cred.cred_def_id;
-        const requestedCredDefId = (predInfo as any).restrictions?.[0]?.cred_def_id;
+      // Try to use the bestMatchingCredential first if it exists
+      let matchingCredential = bestMatchingCredential;
+      
+      // If no bestMatchingCredential or it doesn't match predicate restrictions, search for one
+      if (!matchingCredential || 
+          ((predInfo as any).restrictions?.[0]?.cred_def_id && 
+           matchingCredential.cred_def_id !== (predInfo as any).restrictions?.[0]?.cred_def_id)) {
         
-        if (requestedCredDefId && credDefId === requestedCredDefId) {
-          console.log(`  ✅ Found matching credential def ID for predicate: ${credDefId}`);
-          return true;
-        }
-        
-        return false;
-      });
+        matchingCredential = storedCredentials.find((cred: any) => {
+          const credDefId = cred.cred_def_id;
+          const requestedCredDefId = (predInfo as any).restrictions?.[0]?.cred_def_id;
+          
+          if (requestedCredDefId && credDefId === requestedCredDefId) {
+            console.log(`  ✅ Found matching credential def ID for predicate: ${credDefId}`);
+            return true;
+          }
+          
+          return false;
+        });
+      }
 
       if (matchingCredential) {
+        const credentialId = matchingCredential.referent || matchingCredential.credential_id || matchingCredential.cred_id;
         presentation.indy.requested_predicates[predReferent] = {
-          cred_id: matchingCredential.referent
+          cred_id: credentialId
         };
         matchingDetails.push({
           type: 'predicate',
           referent: predReferent,
           credential: matchingCredential.cred_def_id,
-          credId: matchingCredential.referent
+          credId: credentialId
         });
         console.log(`✅ Matched predicate ${predReferent} with credential ${matchingCredential.cred_def_id}`);
       } else {
@@ -1740,6 +1896,191 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
                     const presentationRequest = extractPresentationRequest(selectedProofRequest);
                     const requestedAttributes = presentationRequest?.requested_attributes || {};
                     const requestedPredicates = presentationRequest?.requested_predicates || {};
+                    
+                    // Check if all attributes require the same cred_def_id
+                    const allAttributeNames: string[] = [];
+                    const attributeReferents: string[] = [];
+                    let commonCredDefId: string | null = null;
+                    let requiresSingleCredential = false;
+                    
+                    Object.entries(requestedAttributes).forEach(([referent, attrInfo]: [string, any]) => {
+                      attributeReferents.push(referent);
+                      const names = attrInfo.names || [attrInfo.name];
+                      if (names && Array.isArray(names)) {
+                        allAttributeNames.push(...names.filter((n: string) => n));
+                      }
+                      
+                      const credDefId = attrInfo.restrictions?.[0]?.cred_def_id;
+                      if (credDefId) {
+                        if (commonCredDefId && commonCredDefId !== credDefId) {
+                          // Different cred_def_ids, need multiple credentials
+                        } else {
+                          commonCredDefId = credDefId;
+                        }
+                      }
+                    });
+                    
+                    requiresSingleCredential = commonCredDefId !== null && allAttributeNames.length > 1;
+                    
+                    // If single credential is required, show unified selection
+                    if (requiresSingleCredential) {
+                      return (
+                        <div className="border-2 border-orange-300 bg-orange-50 rounded-lg p-4">
+                          <div className="bg-orange-100 border border-orange-300 rounded-lg p-3 mb-4">
+                            <div className="flex items-start gap-2">
+                              <span className="text-2xl">⚠️</span>
+                              <div>
+                                <div className="font-semibold text-orange-900">Single Credential Required</div>
+                                <div className="text-sm text-orange-800 mt-1">
+                                  This proof request requires <strong>ALL {allAttributeNames.length} attributes</strong> to come from the <strong>SAME credential</strong>:
+                                </div>
+                                <div className="mt-2 flex flex-wrap gap-1">
+                                  {allAttributeNames.map((attr, idx) => (
+                                    <span key={idx} className="inline-block px-2 py-1 bg-white rounded text-xs font-medium text-gray-700 border border-orange-200">
+                                      {attr}
+                                    </span>
+                                  ))}
+                                </div>
+                                {commonCredDefId && (
+                                  <div className="text-xs text-orange-700 mt-2">
+                                    Required Credential Definition: <code className="bg-white px-1 rounded">{String(commonCredDefId).slice(-20)}...</code>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <h4 className="font-medium text-gray-900 mb-3">
+                            Select ONE credential containing all required attributes:
+                          </h4>
+                          
+                          {(() => {
+                            // Find credentials that have ALL required attributes
+                            const matchingCreds = availableCredentials.filter((cred: any) => {
+                              if (!cred.attrs || typeof cred.attrs !== 'object') return false;
+                              
+                              // Check cred_def_id if specified
+                              if (commonCredDefId && cred.cred_def_id !== commonCredDefId) {
+                                return false;
+                              }
+                              
+                              // Check if credential has ALL required attributes
+                              const credKeys = Object.keys(cred.attrs).map(k => k.toLowerCase());
+                              const hasAllAttributes = allAttributeNames.every(attr => 
+                                credKeys.includes(attr.toLowerCase())
+                              );
+                              
+                              return hasAllAttributes;
+                            });
+                            
+                            if (matchingCreds.length === 0) {
+                              return (
+                                <div className="text-center py-8 bg-red-50 rounded-lg border border-red-200">
+                                  <div className="text-4xl mb-2">❌</div>
+                                  <p className="text-red-700 font-medium">No Matching Credential Found</p>
+                                  <p className="text-sm text-red-600 mt-2">
+                                    You don't have a credential that contains ALL {allAttributeNames.length} required attributes together:
+                                  </p>
+                                  <div className="mt-2 flex flex-wrap justify-center gap-1">
+                                    {allAttributeNames.map((attr, idx) => (
+                                      <span key={idx} className="inline-block px-2 py-1 bg-white rounded text-xs font-medium text-gray-700 border border-red-300">
+                                        {attr}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  {commonCredDefId && (
+                                    <p className="text-xs text-red-600 mt-3">
+                                      From credential definition: <code className="bg-white px-1 rounded">{String(commonCredDefId).slice(-30)}...</code>
+                                    </p>
+                                  )}
+                                  <p className="text-sm text-gray-600 mt-4">
+                                    💡 You need to get a credential issued that contains all these attributes together.
+                                  </p>
+                                </div>
+                              );
+                            }
+                            
+                            return (
+                              <div className="space-y-2">
+                                {matchingCreds.map((cred: any) => {
+                                  const credentialId = cred.referent || cred.cred_id;
+                                  const isSelected = attributeReferents.every(ref => 
+                                    selectedCredentials[ref] === credentialId
+                                  );
+                                  
+                                  return (
+                                    <label
+                                      key={credentialId}
+                                      className={`block p-4 border-2 rounded cursor-pointer transition-colors ${
+                                        isSelected
+                                          ? 'border-green-500 bg-green-50'
+                                          : 'border-gray-300 hover:border-green-300 bg-white'
+                                      }`}
+                                    >
+                                      <input
+                                        type="radio"
+                                        name="single-credential-selection"
+                                        value={credentialId}
+                                        checked={isSelected}
+                                        onChange={() => {
+                                          // Set THIS credential for ALL attribute referents
+                                          const newSelection: Record<string, string> = {};
+                                          attributeReferents.forEach(ref => {
+                                            newSelection[ref] = credentialId;
+                                          });
+                                          setSelectedCredentials(newSelection);
+                                        }}
+                                        className="mr-3"
+                                      />
+                                      <div className="inline-block w-full">
+                                        <div className="font-medium text-gray-900 mb-2">
+                                          🎫 {cred.schema_id ? `Schema: ${cred.schema_id.split(':')[2]}` : 'Credential'}
+                                        </div>
+                                        <div className="text-xs text-gray-600 mb-2">
+                                          Cred Def ID: <code className="bg-gray-100 px-1 rounded">{cred.cred_def_id?.slice(-30)}...</code>
+                                        </div>
+                                        
+                                        {/* Show all attributes */}
+                                        <div className="mt-2 p-3 bg-gray-50 rounded border border-gray-200">
+                                          <div className="font-semibold text-gray-700 mb-2">📋 All Attributes in this credential:</div>
+                                          <div className="grid grid-cols-2 gap-2">
+                                            {Object.entries(cred.attrs).map(([key, value]) => {
+                                              const isRequired = allAttributeNames.includes(key);
+                                              return (
+                                                <div key={key} className={`text-xs p-2 rounded ${
+                                                  isRequired 
+                                                    ? 'bg-green-100 border border-green-300' 
+                                                    : 'bg-white border border-gray-200'
+                                                }`}>
+                                                  <div className="font-medium text-gray-700">
+                                                    {isRequired && '✅ '}{key}
+                                                  </div>
+                                                  <div className="text-gray-600 truncate" title={String(value)}>
+                                                    {String(value)}
+                                                  </div>
+                                                </div>
+                                              );
+                                            })}
+                                          </div>
+                                        </div>
+                                        
+                                        {isSelected && (
+                                          <div className="mt-2 p-2 bg-green-100 border border-green-300 rounded text-xs text-green-800">
+                                            ✅ This credential will be used for ALL {allAttributeNames.length} required attributes
+                                          </div>
+                                        )}
+                                      </div>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    }
+                    
+                    // Otherwise, show per-attribute selection (old behavior)
                     const allRequirements: Record<string, any> = {
                       ...Object.fromEntries(Object.entries(requestedAttributes).map(([k, v]) => [k, { ...(v as any), type: 'attribute' }])),
                       ...Object.fromEntries(Object.entries(requestedPredicates).map(([k, v]) => [k, { ...(v as any), type: 'predicate' }]))
@@ -1871,12 +2212,24 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
                             </>
                           ) : (
                             <div className="space-y-2">
-                              {matchingCreds.map((cred: any) => {
-                                const credId = cred.referent || cred.credential_id || cred.cred_id;
-                                const schemaName = cred.schema_id?.split(':')[2] || 'Credential';
-                                const credDefId = cred.cred_def_id;
+                              {(() => {
+                                // DEDUPLICATE: Remove duplicate credentials by credential ID
+                                const seenCredIds = new Set<string>();
+                                const uniqueCreds = matchingCreds.filter((cred: any) => {
+                                  const credId = cred.referent || cred.credential_id || cred.cred_id;
+                                  if (seenCredIds.has(credId)) {
+                                    return false; // Skip duplicate
+                                  }
+                                  seenCredIds.add(credId);
+                                  return true;
+                                });
                                 
-                                return (
+                                return uniqueCreds.map((cred: any) => {
+                                  const credId = cred.referent || cred.credential_id || cred.cred_id;
+                                  const schemaName = cred.schema_id?.split(':')[2] || 'Credential';
+                                  const credDefId = cred.cred_def_id;
+                                  
+                                  return (
                                   <label
                                     key={credId}
                                     className={`block p-3 border rounded cursor-pointer transition-colors ${
@@ -1930,8 +2283,9 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
                                     </div>
                                   </label>
                                 );
-                              })}
-                            </div>
+                              });
+                            })()}
+                          </div>
                           )}
                         </div>
                       );
