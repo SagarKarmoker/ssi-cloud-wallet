@@ -1194,21 +1194,23 @@ export const ProofPage: React.FC<ProofPageProps> = ({ walletId }) => {
   })));
 
   // Filter requests that we've received (requests from verifiers to us)
+  // Only show requests in 'request-received' state (pending, waiting for our response)
   const receivedRequests = proofRequests.filter(req => {
     const state = req.state;
     return state === 'request-received' ||  // The actual state we're seeing
-           state === 'request_received' ||   // underscore version
-           state === 'presentation-sent' ||  // after we send proof
-           state === 'presentation_sent';    // underscore version
-    // Note: 'abandoned' states are excluded (declined or failed requests)
+           state === 'request_received';     // underscore version
   });
 
+  // Filter requests that we've sent or completed
+  // Includes all states after sending: presentation-sent, done, verified, etc.
   const sentRequests = proofRequests.filter(req => {
     const state = req.state;
     return state === 'request-sent' || 
            state === 'request_sent' ||
            state === 'presentation-received' || 
            state === 'presentation_received' ||
+           state === 'presentation-sent' ||  // After we send proof
+           state === 'presentation_sent' ||   // underscore version
            state === 'verified' ||
            state === 'done';
   });

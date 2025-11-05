@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, Button, Loading, Alert } from '../components';
+import { Card, Button, Loading, Alert, Modal } from '../components';
 import { DebugCredential } from '../components/DebugCredential';
 import { credentialService, type Credential } from '../services';
 
@@ -14,6 +14,8 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'stored' | 'pending'>('pending');
   const [showDebug, setShowDebug] = useState(false);
+  const [selectedCredential, setSelectedCredential] = useState<any>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   useEffect(() => {
     if (walletId) {
@@ -224,7 +226,8 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
             Pending Credentials ({credentialExchanges.filter(c => {
               if (!c || !c.state) return false;
               const normalizedState = c.state.replace(/-/g, '_');
-              return normalizedState !== 'stored' && normalizedState !== 'abandoned';
+              // Only show offers that need user action (offer_received, credential_issued)
+              return normalizedState === 'offer_received' || normalizedState === 'credential_issued';
             }).length})
           </button>
           <button
@@ -249,7 +252,13 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
             <p><strong>Pending Count:</strong> {credentialExchanges.filter(c => {
               if (!c || !c.state) return false;
               const normalizedState = c.state.replace(/-/g, '_');
-              return normalizedState !== 'stored' && normalizedState !== 'abandoned';
+              // Only show offers that need user action
+              return normalizedState === 'offer_received' || normalizedState === 'credential_issued';
+            }).length}</p>
+            <p><strong>Completed/Done (in Stored):</strong> {credentialExchanges.filter(c => {
+              if (!c || !c.state) return false;
+              const normalizedState = c.state.replace(/-/g, '_');
+              return normalizedState === 'done' || normalizedState === 'credential_acked';
             }).length}</p>
             <p><strong>Abandoned (Hidden):</strong> {credentialExchanges.filter(c => {
               if (!c || !c.state) return false;
@@ -314,9 +323,10 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
               .filter(exchange => {
                 if (!exchange || !exchange.state) return false;
                 const normalizedState = exchange.state.replace(/-/g, '_');
-                // Hide stored and abandoned offers
-                return normalizedState !== 'stored' && normalizedState !== 'abandoned';
-              }) // Show non-stored, non-abandoned exchanges
+                // Only show offers that need user action (offer_received, credential_issued)
+                // Exclude: done, abandoned, credential_acked, stored
+                return normalizedState === 'offer_received' || normalizedState === 'credential_issued';
+              })
               .map((exchange) => (
                 <Card
                   key={exchange.credential_exchange_id}
@@ -360,8 +370,11 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
                     <Button
                       size="sm"
                       onClick={() => {
-                        const details = `Credential Exchange Details:\n\nExchange ID: ${exchange.credential_exchange_id}\nSchema: ${exchange.schema_id || 'N/A'}\nCred Def: ${exchange.cred_def_id || 'N/A'}\nState: ${exchange.state}\n\nAttributes:\n${Object.entries(exchange.attributes || {}).map(([key, value]) => `${key}: ${value}`).join('\n')}`;
-                        alert(details);
+                        setSelectedCredential({
+                          type: 'exchange',
+                          data: exchange
+                        });
+                        setIsModalOpen(true);
                       }}
                     >
                       View Details
@@ -399,30 +412,57 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
                   </div>
                 </Card>
               ))
-          : credentials.filter(credential => credential && credential.credential_id).map((credential) => {
+          : credentials.filter(credential => {
+              // More lenient filtering - just check if credential exists
+              // W3C credentials might have different ID field names
+              console.log('Stored credential:', credential);
+              return credential != null;
+            }).map((credential, index) => {
               // Try to get a meaningful title from attributes
               const getCredentialTitle = (cred: any) => {
-                if (cred.attributes) {
+                // Try multiple possible data fields
+                const credData = cred.attributes || 
+                                cred.credentialSubject || 
+                                cred.credential?.credentialSubject ||
+                                cred.attrs ||
+                                {};
+                
+                if (credData && Object.keys(credData).length > 0) {
                   // Common attribute names that might make a good title
                   const titleFields = ['name', 'full_name', 'fullName', 'title', 'degree', 'certificate_name', 'course_name'];
                   for (const field of titleFields) {
-                    if (cred.attributes[field]) {
-                      return cred.attributes[field];
+                    if (credData[field]) {
+                      return credData[field];
                     }
                   }
-                  // If no title field, use the first attribute
-                  const firstAttribute = Object.entries(cred.attributes)[0];
-                  if (firstAttribute) {
-                    return `${firstAttribute[0]}: ${firstAttribute[1]}`;
+                  // If no title field, use schema name or generic title
+                  // Don't use first attribute as it might be too long (like hashes)
+                }
+                
+                // Try to get schema name from schema_id
+                if (cred.schema_id) {
+                  const schemaParts = cred.schema_id.split(':');
+                  if (schemaParts.length > 2) {
+                    return schemaParts[2]; // Schema name is usually the 3rd part
                   }
                 }
-                return `Credential ${cred.credential_id?.slice(0, 8)}...`;
+                
+                // Get ID from various possible fields
+                const credId = cred.credential_id || cred.referent || cred.cred_id || `cred-${index}`;
+                return `Credential ${String(credId).slice(0, 8)}...`;
               };
+
+              // Get credential ID from various possible fields (using any to access dynamic properties)
+              const credentialId = (credential as any).credential_id || (credential as any).referent || (credential as any).cred_id || `credential-${index}`;
+              
+              // Get title and truncate if too long
+              const fullTitle = getCredentialTitle(credential);
+              const displayTitle = fullTitle.length > 30 ? fullTitle.slice(0, 30) + '...' : fullTitle;
 
               return (
                 <Card
-                  key={credential.credential_id}
-                  title={getCredentialTitle(credential)}
+                  key={credentialId}
+                  title={displayTitle}
                 >
                   <div className="space-y-3 text-sm text-gray-600">
                     <div className="flex items-center justify-between">
@@ -433,31 +473,44 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
                     </div>
                     
                     <div className="grid grid-cols-1 gap-2">
-                      <p><span className="font-medium">ID:</span> <span className="font-mono text-xs">{credential.credential_id?.slice(0, 12)}...</span></p>
+                      <p><span className="font-medium">ID:</span> <span className="font-mono text-xs">{String(credentialId).slice(0, 12)}...</span></p>
                       {credential.created_at && (
                         <p><span className="font-medium">Received:</span> {new Date(credential.created_at).toLocaleString()}</p>
                       )}
                     </div>
                     
-                    {credential.attributes && Object.keys(credential.attributes).length > 0 && (
-                      <div className="mt-3">
-                        <p className="font-medium text-gray-700 mb-2">Credential Data:</p>
-                        <div className="bg-gray-50 p-3 rounded-md border">
-                          <div className="space-y-2">
-                            {Object.entries(credential.attributes).map(([key, value]) => (
-                              <div key={key} className="flex flex-col sm:flex-row sm:justify-between">
-                                <span className="font-medium text-gray-700 capitalize">
-                                  {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
-                                </span>
-                                <span className="text-gray-900 sm:text-right sm:max-w-[60%] break-words">
-                                  {String(value)}
-                                </span>
-                              </div>
-                            ))}
+                    {(() => {
+                      // Try multiple possible data fields for W3C and Indy credentials
+                      const credData = (credential as any).attributes || 
+                                      (credential as any).credentialSubject || 
+                                      (credential as any).credential?.credentialSubject ||
+                                      (credential as any).attrs ||
+                                      null;
+                      
+                      if (!credData || Object.keys(credData).length === 0) {
+                        return null;
+                      }
+                      
+                      return (
+                        <div className="mt-3">
+                          <p className="font-medium text-gray-700 mb-2">Credential Data:</p>
+                          <div className="bg-gray-50 p-3 rounded-md border">
+                            <div className="space-y-2">
+                              {Object.entries(credData).map(([key, value]) => (
+                                <div key={key} className="flex flex-col gap-1 pb-2 border-b border-gray-200 last:border-0 last:pb-0">
+                                  <span className="font-medium text-gray-700 capitalize text-sm">
+                                    {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
+                                  </span>
+                                  <span className="text-gray-900 text-xs font-mono break-all bg-white p-2 rounded">
+                                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {/* Technical Details (Collapsible) */}
                     <details className="mt-3">
@@ -478,18 +531,12 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
                     <Button
                       size="sm"
                       onClick={() => {
-                        const details = `=== CREDENTIAL DETAILS ===\n\n` +
-                          `Title: ${getCredentialTitle(credential)}\n` +
-                          `ID: ${credential.credential_id}\n` +
-                          `Status: ${credential.state || 'Stored'}\n` +
-                          `Created: ${credential.created_at ? new Date(credential.created_at).toLocaleString() : 'Unknown'}\n\n` +
-                          `=== CREDENTIAL DATA ===\n` +
-                          `${Object.entries(credential.attributes || {}).map(([key, value]) => `${key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}: ${value}`).join('\n')}\n\n` +
-                          `=== TECHNICAL INFO ===\n` +
-                          `Schema ID: ${credential.schema_id}\n` +
-                          `Credential Definition: ${credential.cred_def_id}\n` +
-                          `Connection ID: ${credential.connection_id || 'N/A'}`;
-                        alert(details);
+                        setSelectedCredential({
+                          type: 'stored',
+                          data: credential,
+                          title: getCredentialTitle(credential)
+                        });
+                        setIsModalOpen(true);
                       }}
                       className="bg-blue-600 hover:bg-blue-700 text-white"
                     >
@@ -502,7 +549,7 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
                       onClick={() => {
                         // Copy credential data as JSON to clipboard
                         const credentialData = {
-                          id: credential.credential_id,
+                          id: credentialId,
                           attributes: credential.attributes,
                           schema_id: credential.schema_id,
                           cred_def_id: credential.cred_def_id,
@@ -528,7 +575,8 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
         (activeTab === 'pending' && credentialExchanges.filter(c => {
           if (!c || !c.state) return false;
           const normalizedState = c.state.replace(/-/g, '_');
-          return normalizedState !== 'stored' && normalizedState !== 'abandoned';
+          // Only show offers that need user action
+          return normalizedState === 'offer_received' || normalizedState === 'credential_issued';
         }).length === 0) ||
         (activeTab === 'stored' && credentials.length === 0)
       ) && (
@@ -549,6 +597,178 @@ export const CredentialPage: React.FC<CredentialPageProps> = ({ walletId }) => {
           </div>
         </Card>
       )}
+
+      {/* Credential Details Modal */}
+      <Modal
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedCredential(null);
+        }}
+        title={selectedCredential?.type === 'stored' ? '📋 Credential Details' : '📄 Credential Exchange Details'}
+        size="lg"
+      >
+        {selectedCredential && (
+          <div className="space-y-6">
+            {selectedCredential.type === 'stored' ? (
+              // Stored Credential Details
+              <>
+                <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                  <h4 className="font-semibold text-blue-900 mb-2">{selectedCredential.title}</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">ID:</span>
+                      <span className="font-mono text-xs text-gray-900 break-all">
+                        {selectedCredential.data.credential_id || selectedCredential.data.referent || selectedCredential.data.cred_id || 'N/A'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Status:</span>
+                      <span className="px-2 py-1 rounded-full text-xs bg-green-100 text-green-800">
+                        ✓ {selectedCredential.data.state || 'Stored'}
+                      </span>
+                    </div>
+                    {selectedCredential.data.created_at && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Created:</span>
+                        <span className="text-gray-900">{new Date(selectedCredential.data.created_at).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Credential Data */}
+                <div>
+                  <h5 className="font-semibold text-gray-900 mb-3">📝 Credential Data</h5>
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-3">
+                    {(() => {
+                      // Try multiple possible data fields for W3C and Indy credentials
+                      const credData = selectedCredential.data.attributes || 
+                                      selectedCredential.data.credentialSubject || 
+                                      selectedCredential.data.credential?.credentialSubject ||
+                                      selectedCredential.data.attrs ||
+                                      {};
+                      
+                      const entries = Object.entries(credData);
+                      
+                      if (entries.length === 0) {
+                        return (
+                          <div className="text-gray-500 text-sm">
+                            No credential data available. 
+                            <details className="mt-2">
+                              <summary className="cursor-pointer text-blue-600">View raw credential</summary>
+                              <pre className="mt-2 text-xs bg-white p-2 rounded border overflow-auto max-h-60">
+                                {JSON.stringify(selectedCredential.data, null, 2)}
+                              </pre>
+                            </details>
+                          </div>
+                        );
+                      }
+                      
+                      return entries.map(([key, value]) => (
+                        <div key={key} className="flex flex-col gap-1 pb-3 border-b border-gray-200 last:border-0 last:pb-0">
+                          <span className="font-medium text-gray-700 capitalize text-sm">
+                            {key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}:
+                          </span>
+                          <span className="text-gray-900 text-xs font-mono break-all bg-white p-2 rounded border">
+                            {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                </div>
+
+                {/* Technical Info */}
+                <div>
+                  <h5 className="font-semibold text-gray-900 mb-3">🔧 Technical Information</h5>
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2 text-sm">
+                    <div>
+                      <span className="font-medium text-gray-700">Schema ID:</span>
+                      <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.schema_id}</p>
+                    </div>
+                    <div>
+                      <span className="font-medium text-gray-700">Credential Definition:</span>
+                      <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.cred_def_id}</p>
+                    </div>
+                    {selectedCredential.data.connection_id && (
+                      <div>
+                        <span className="font-medium text-gray-700">Connection ID:</span>
+                        <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.connection_id}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              // Credential Exchange Details
+              <>
+                <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                  <h4 className="font-semibold text-purple-900 mb-2">{getExchangeTitle(selectedCredential.data.state)}</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">Exchange ID:</span>
+                      <span className="font-mono text-xs text-gray-900">{selectedCredential.data.credential_exchange_id}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-gray-600">State:</span>
+                      <span className={`px-2 py-1 rounded-full text-xs ${getCredentialStateColor(selectedCredential.data.state)}`}>
+                        {formatState(selectedCredential.data.state)}
+                      </span>
+                    </div>
+                    {selectedCredential.data.created_at && (
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Created:</span>
+                        <span className="text-gray-900">{new Date(selectedCredential.data.created_at).toLocaleString()}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Attributes */}
+                {selectedCredential.data.attributes && Object.keys(selectedCredential.data.attributes).length > 0 && (
+                  <div>
+                    <h5 className="font-semibold text-gray-900 mb-3">📝 Attributes</h5>
+                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2">
+                      {Object.entries(selectedCredential.data.attributes).map(([key, value]) => (
+                        <div key={key} className="flex justify-between border-b border-gray-200 pb-2 last:border-0 last:pb-0">
+                          <span className="font-medium text-gray-700">{key}:</span>
+                          <span className="text-gray-900">{String(value)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Technical Details */}
+                <div>
+                  <h5 className="font-semibold text-gray-900 mb-3">🔧 Technical Details</h5>
+                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200 space-y-2 text-sm">
+                    {selectedCredential.data.schema_id && (
+                      <div>
+                        <span className="font-medium text-gray-700">Schema ID:</span>
+                        <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.schema_id}</p>
+                      </div>
+                    )}
+                    {selectedCredential.data.cred_def_id && (
+                      <div>
+                        <span className="font-medium text-gray-700">Credential Definition:</span>
+                        <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.cred_def_id}</p>
+                      </div>
+                    )}
+                    {selectedCredential.data.connection_id && (
+                      <div>
+                        <span className="font-medium text-gray-700">Connection ID:</span>
+                        <p className="font-mono text-xs text-gray-600 break-all mt-1">{selectedCredential.data.connection_id}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };
